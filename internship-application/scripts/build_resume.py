@@ -12,13 +12,14 @@ What it does:
   2. Compiles with the project folder as the working directory (so its .cls, .sty, fonts and
      images are found) but writes every build file to the system temp folder, so nothing is
      created in, or later removed from, the user's folders.
-  3. Checks the page count and that the PDF's text can be extracted (applicant tracking
-     systems read the text layer, not the picture).
+  3. Checks the page count, that the PDF's text can be extracted (applicant tracking
+     systems read the text layer, not the picture), and how much of the page is left empty.
   4. Copies the PDF to --out. If a file already exists there, it is moved into an _old/
      folder beside it (with a date and time in its name) first. Nothing is ever deleted.
 
 Prints one JSON object. Exit codes:
-  0  built and within the page limit
+  0  built and within the page limit. "free_lines" says roughly how many lines are still empty at the bottom;
+     2 or more means there's room to add from the master (a warning says so)
   1  compile failed (the JSON has the first LaTeX errors with line numbers)
   2  built, but longer than --max-pages: "lines_over" says roughly how much to cut, so trim once and run again
   3  no LaTeX engine available here (fall back to compiling in Overleaf)
@@ -28,6 +29,7 @@ import json
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -94,32 +96,65 @@ def page_count(pdf):
         from pypdf import PdfReader
         return len(PdfReader(pdf).pages)
     except Exception:
+        pass
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf) as doc:
+            return len(doc.pages)
+    except Exception:
         return None
 
 
-def page_fill(pdf, page):
-    """How far down the page the last line of text reaches (0 to 1), from word positions."""
-    if not shutil.which('pdftotext'):
+def word_boxes(pdf, page):
+    """Page width, height and word boxes (left, top, right, bottom, in points from the top-left corner) for one page.
+
+    Uses poppler's pdftotext -bbox, else pdfplumber. Some pdftotext builds (xpdf's, common on Windows) have
+    no -bbox, and without a fallback the page checks below would quietly report nothing."""
+    if shutil.which('pdftotext'):
+        r = run(['pdftotext', '-bbox', '-f', str(page), '-l', str(page), pdf, '-'], cwd=os.path.dirname(pdf) or '.')
+        m = re.search(r'<page width="([\d.]+)" height="([\d.]+)"', r.stdout)
+        boxes = [tuple(map(float, b)) for b in re.findall(
+            r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)"', r.stdout)]
+        if m and boxes:
+            return float(m.group(1)), float(m.group(2)), boxes
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf) as doc:
+            p = doc.pages[page - 1]
+            boxes = [(w['x0'], w['top'], w['x1'], w['bottom']) for w in p.extract_words()]
+            return (float(p.width), float(p.height), boxes) if boxes else None
+    except Exception:
         return None
-    r = run(['pdftotext', '-bbox', '-f', str(page), '-l', str(page), pdf, '-'], cwd=os.path.dirname(pdf) or '.')
-    m = re.search(r'<page width="([\d.]+)" height="([\d.]+)"', r.stdout)
-    ys = [float(y) for y in re.findall(r'<word [^>]*yMax="([\d.]+)"', r.stdout)]
-    if not m or not ys:
-        return None
-    return round(max(ys) / float(m.group(2)), 2)
+
+
+def page_space(pdf, page):
+    """How far down the page the text reaches (0 to 1), and about how many more lines would fit below it.
+
+    The second number exists because a fill share alone hid the problem: tailored pages that stopped at
+    80-93% of the page (6 to 11 empty lines) never reached the old "under 75%" warning."""
+    found = word_boxes(pdf, page)
+    if not found:
+        return None, None
+    _, height, boxes = found
+    top, last = min(b[1] for b in boxes), max(b[3] for b in boxes)
+    fill = round(last / height, 2)
+    # Line height is the usual step from one line's bottom to the next. Section gaps are rarer, so the median
+    # skips them; steps under 6pt are words of the same line set in different fonts.
+    bottoms = sorted({round(b[3]) for b in boxes})
+    steps = [b - a for a, b in zip(bottoms, bottoms[1:]) if 6 <= b - a <= 24]
+    if not steps:
+        return fill, None
+    # Resume templates nearly always use the same top and bottom margin, so the text area ends one top margin
+    # above the page edge. On a full first page of a master this comes out at 0.
+    return fill, max(0, int((height - top - last) / statistics.median(steps)))
 
 
 def margins(pdf, page=1):
     """Distance from the text to each page edge, in inches, measured from word positions."""
-    if not shutil.which('pdftotext'):
+    found = word_boxes(pdf, page)
+    if not found:
         return None
-    r = run(['pdftotext', '-bbox', '-f', str(page), '-l', str(page), pdf, '-'], cwd=os.path.dirname(pdf) or '.')
-    m = re.search(r'<page width="([\d.]+)" height="([\d.]+)"', r.stdout)
-    boxes = [tuple(map(float, b)) for b in re.findall(
-        r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)"', r.stdout)]
-    if not m or not boxes:
-        return None
-    w, h = float(m.group(1)), float(m.group(2))
+    w, h, boxes = found
     return {'left': round(min(b[0] for b in boxes) / 72, 2), 'right': round((w - max(b[2] for b in boxes)) / 72, 2),
             'top': round(min(b[1] for b in boxes) / 72, 2), 'bottom': round((h - max(b[3] for b in boxes)) / 72, 2)}
 
@@ -247,22 +282,34 @@ def main():
         limit = a.max_pages if a.max_pages > 0 else None
         over = limit is not None and pages is not None and pages > limit
         fill = None
+        free = None
         extra_lines = None
         if over:
             extra_lines = overflow_lines(pdf, a.max_pages + 1)
             warnings.append(f'{pages} pages: about {extra_lines} lines past page {a.max_pages}. Cut low-value content first, following the '
                             'trim order. If only a few lines remain over and the next thing to cut is a strong match for the posting, '
                             'squeeze instead, within the limits in tailoring.md, then build again.')
-        elif pages and limit is not None:
-            fill = page_fill(pdf, pages)
-            if fill is not None and fill < 0.75:
-                warnings.append(f'The page is only about {round(fill * 100)}% full. If the master has more items relevant '
-                                'to this posting that were cut, bring the best ones back. Never pad with unrelated items '
-                                'or stretch the spacing; some white space is fine.')
+        elif limit is not None and not pages:
+            warnings.append('Could not count the pages (that needs pdfinfo, pypdf or pdfplumber). When you look at the rendered '
+                            'PDF, check by eye that it is one page with no empty lines at the bottom.')
+        elif limit is not None:
+            fill, free = page_space(pdf, pages)
+            if fill is None:
+                warnings.append('Could not measure how full the page is (that needs pdftotext from poppler, or pdfplumber). '
+                                'When you look at the rendered page, check the bottom for empty lines by eye.')
+            elif free is not None and free >= 2:
+                warnings.append(f'About {free} lines are empty at the bottom of the page. Fill them from the master, following '
+                                '"Filling the page" in tailoring.md: more bullets on the entries you kept come first. Add about '
+                                f'{free} lines (a two-line bullet counts as two) and build again; if it spills onto page 2, take '
+                                'back the last addition. Never pad with unrelated items or stretch the spacing.')
 
         page_margins = margins(pdf)
         if page_margins:
-            tight = [k for k in ('left', 'right', 'top', 'bottom') if page_margins[k] < 0.395]
+            # A full page's last line hangs a little below the text area (LaTeX lets its descenders do that): a master
+            # with margin=0.45in measures 0.38 in at the bottom. So the bottom gets 0.1 in of slack, or filling the
+            # page to the bottom would read as a squeezed margin.
+            limits = {'left': 0.395, 'right': 0.395, 'top': 0.395, 'bottom': 0.295}
+            tight = [k for k in limits if page_margins[k] < limits[k]]
             if tight:
                 warnings.append('Margins are too tight (' + ', '.join(f"{k} {page_margins[k]} in" for k in tight) + '). Keep every margin '
                                 'at least 0.4 in; undo the last squeeze and cut content instead.')
@@ -283,7 +330,7 @@ def main():
             shutil.move(out, replaced)
         shutil.copyfile(pdf, out)
         print(json.dumps({'ok': not over, 'pdf': out, 'engine': engine, 'pages': pages, 'max_pages': a.max_pages,
-                          'lines_over': extra_lines, 'page_fill': fill, 'margins_in': page_margins,
+                          'lines_over': extra_lines, 'page_fill': fill, 'free_lines': free, 'margins_in': page_margins,
                           'smallest_text_pt': text_pt,
                           'missing_text': missing_text, 'warnings': warnings, 'previous_version_moved_to': replaced}, indent=1))
         return 2 if over else 0
