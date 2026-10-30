@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Zips made for uploading the skills
+*.zip
+
+# Personal job-search files, in case you run a search from this folder
+/resume/
+/Applications/
+/profile.json
+/transcript.pdf
+/jobs.txt
+/tracker.xlsx
+_old/
