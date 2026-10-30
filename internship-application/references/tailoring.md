@@ -37,7 +37,7 @@ Two versions for different roles should read differently. If you'd send the same
 
 ## Page and section order
 
-- One page, always. Use the master's margins and font size; never shrink them to fit.
+- One page, always, filled to the bottom when the master has enough for it (see "Filling the page"). Use the master's margins and font size; never shrink them to fit.
 - Education stays at the top while the user is a student.
 - After Education, put whichever of Experience or Projects is stronger evidence for this internship. A student whose best match is a class project should lead with Projects. Keep the master's section names.
 - Leadership and activities, then Skills, at the end. Drop a section only if nothing in it is relevant and space is needed.
@@ -58,7 +58,7 @@ When picking what to keep for a long master, leave awards out of the first selec
 
 The master can be any length, and may grow to several pages as the user adds to it.
 
-**When the master is more than about two pages, select instead of cutting.** Start the tailored copy from what to keep, not from everything: the header, the education entry and coursework line, the two to four projects and the experience entries that best match the posting (with their most relevant bullets), one or two activities if they fit, and the skills section. Build it, then adjust: if the page is far from full, add the next most relevant items back; if it's over, trim as below. Choosing first is much faster than deleting most of a long document, and it keeps the focus on the posting.
+**When the master is more than about two pages, select instead of cutting.** Start the tailored copy from what to keep, not from everything: the header, the education entry and coursework line, the two to four projects and the experience entries that best match the posting (with their most relevant bullets), one or two activities if they fit, and the skills section. Build it, then adjust: if the build reports 2 or more `free_lines`, add back as in "Filling the page" below; if it's over, trim as below. Choosing first is much faster than deleting most of a long document, and it keeps the focus on the posting.
 
 `ats_check.py` will list more keywords under `in_master_not_resume` as the master grows. That's expected: bring back the ones that matter most for this posting while staying on one page, and leave the rest.
 
@@ -83,7 +83,20 @@ Never cut the name and contact line, the education entry (school, degree, major,
 
 Then look at the rendered page: it must still be easy to skim, with entries and sections clearly separated. If squeezing within these limits doesn't make it fit, or the page starts to look cramped, undo the squeeze and cut the next item instead. The build reports the margins and the smallest text size, and warns if either goes past these limits. Mention any squeeze in changes.md (for example "reduced spacing slightly to keep the Course Planner project").
 
-If the build says the page is far from full, bring back the next most relevant items from the master, if there are any, with awards last. Don't pad with unrelated material; a little white space on a student resume is normal.
+## Filling the page
+
+Empty lines at the bottom are evidence the user has but the recruiter never sees. Early tailored versions stopped 6 to 11 lines short of the bottom while their projects sat at one or two bullets and the master had more. So the page is done when its last line is within about a line of the bottom margin, or when nothing left in the master fits the posting.
+
+The build reports `free_lines`: about how many lines are still empty at the bottom. At 2 or more, add about that many lines (a two-line bullet counts as two) in this order, then build again:
+
+1. **More bullets on the entries you kept**, most relevant entry first. They were chosen for this posting, so their other master bullets are the safest additions. Aim for three or four bullets on the top one or two projects and the main internship, and at least two on every other kept entry.
+2. **Split merges made only for space.** If you merged two master bullets to save a line, give each its own bullet again.
+3. **The next most relevant project or experience** you left out.
+4. **Keywords the user really has**: more courses in the coursework line, and skills the ATS check lists under `in_master_not_resume`, once you've run it.
+5. **One more activity**, if it shows something the posting asks for, such as teamwork, leadership or communication.
+6. **Awards last**: at most one line (see "Awards and honors").
+
+Every addition goes through the rewrite pass like the rest, so it points at this posting's angle and `compare_bullets.py` still passes. If a build spills onto page 2, take back the last addition or shorten a bullet to one line. Never pad with unrelated material, repeat a fact in two places, or stretch the spacing to fill. If you stop with 2 or more lines free, say why on the Page line in changes.md.
 
 ## Education
 
@@ -98,7 +111,7 @@ Projects are often the strongest evidence a student has.
 
 - Choose the two to four projects that best match the posting. Leave out ones that show nothing it asks for.
 - In each project's heading, list the tools the posting mentions first, but only tools the project really used.
-- One to three bullets each, rewritten for this posting (see "Rewrite every kept bullet"): what was built, the user's part, and a result if the master has one (users, scale, speed, accuracy). The first bullet should show the project's strongest link to the posting.
+- Three or four bullets on the strongest one or two projects, and at least two on each of the others; one only when the page is truly full. Each is rewritten for this posting (see "Rewrite every kept bullet"): what was built, the user's part, and a result if the master has one (users, scale, speed, accuracy). The first bullet should show the project's strongest link to the posting.
 - Group and class projects: describe the user's own part ("Implemented the prerequisite checker for a 4-person class project"), never the team's whole result as if it were theirs. Labeling something a class project is fine; recruiters expect it.
 
 ## Experience
@@ -173,6 +186,7 @@ If the master itself uses a two-column or icon-heavy template, keep its look in 
 - Coursework: led with <courses> (posting asks for <requirement>).
 - Projects: moved <project> to the top; dropped <project> for space.
 - Skills: put <tools> first.
+- Page: filled to the bottom. (Or: <N> lines free, because <nothing else in the master fits this posting>.)
 
 ## Reworded
 - <master bullet> → <tailored bullet> (why: <which part of the angle it shows>)
