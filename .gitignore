@@ -10,6 +10,9 @@ desktop.ini
 # Zips made for uploading the skills
 *.zip
 
+# Local notes for Claude Code
+CLAUDE.md
+
 # Personal job-search files, in case you run a search from this folder
 /resume/
 /Applications/
@@ -18,3 +21,6 @@ desktop.ini
 /jobs.txt
 /tracker.xlsx
 _old/
+
+# Applyfile profile backups hold your personal details
+applyfile-profile.json
