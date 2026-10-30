@@ -135,7 +135,9 @@ def main():
 
     new_numbers = sorted(n for n in numbers(cand) - known_nums if not re.fullmatch(r'\d', n))
     def known_word(k):
-        return re.search(r'(?<![a-z0-9])' + re.escape(k) + r'(?![a-z0-9])', known_flat) is not None
+        # A digit may come right before it: terms are read from the first letter, so the master's "3D-CNN"
+        # gives "D-CNN", and that has to count as known.
+        return re.search(r'(?<![a-z])' + re.escape(k) + r'(?![a-z0-9])', known_flat) is not None
     new_terms = sorted(t for k, t in terms(cand).items() if not known_word(k))
     placeholders = sorted(set(m.group(0) for m in re.finditer(
         r'\[(?:company|role|team|name|insert[^\]]*|your [^\]]*|[A-Z ]{3,})\]|\bTODO\b|\bTBD\b|\bXXX+\b|lorem ipsum|<[a-z ]+>', cand, re.I)))

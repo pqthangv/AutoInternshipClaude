@@ -1,6 +1,39 @@
 # Tailoring a student resume to an internship
 
-The goal is one page where a recruiter skimming for 10 seconds, and an applicant tracking system scanning for keywords, both see that this student has worked with what the internship needs: in classes, projects, research, jobs or clubs. You get there by choosing, ordering and phrasing, never by adding. Every line has to be something the student can talk about confidently in an interview, because internship interviews dig into exactly these projects.
+The goal is one page where a recruiter skimming for 10 seconds, and an applicant tracking system scanning for keywords, both see that this student has worked with what the internship needs: in classes, projects, research, jobs or clubs. You get there by choosing, ordering and rewriting, never by adding facts. Every line has to be something the student can talk about confidently in an interview, because internship interviews dig into exactly these projects.
+
+## How to tailor: three passes
+
+Choosing which projects to keep is only the start. A resume that keeps the master's bullets word for word reads the same for every job: early versions of this skill copied 96% of bullets unchanged, and every application got nearly the same page. So every tailoring does all three passes:
+
+1. **Read the posting for its angle.** Before touching the resume, write down (for yourself) the three to five things this team will judge the user on, from the responsibilities, the requirements and what the team builds. For example: "backend services in Java, SQL, testing, working with product teams". Note the posting's exact words for each, since those are what recruiters search for.
+2. **Choose and order** what goes on the page (sections below): the entries that best show those things, strongest first.
+3. **Rewrite every kept bullet for that angle** (next section). This is the pass that makes it tailored.
+
+Then check it: `compare_bullets.py` (SKILL.md step 3) shows how many bullets are still word for word. When more than about half are, go back to pass 3. The exception is a posting whose language already matches the master's; say so in changes.md.
+
+## Rewrite every kept bullet
+
+A master entry usually holds several facts: what was built, the tools, the user's part, tests, deployment, users, speed. Each posting cares about different ones. For each kept bullet:
+
+- **Decide its job:** which of the posting's three to five things it proves.
+- **Lead with that:** the action and the posting's word for the skill, if it's true to what the user did ("Wrote REST endpoints in Flask" for a backend role, "Built the drag-and-drop schedule view in React" for a frontend one).
+- **Pull the matching facts forward.** Pick and order the facts from that entry the posting cares about. You may merge two bullets from the same entry, or split one, as long as every fact comes from the master.
+- **End with the master's result** (users, numbers, speed) when it has one.
+- **Keep it word for word only when it already leads with what this posting wants.**
+
+The same project, rewritten for four roles, using only facts from its master bullets ("Built a course planner web app in React and Flask used by 300 students"; "Wrote SQL queries to load 1,200 courses from the public catalog into SQLite"; "Added 85 unit tests with pytest and set up GitHub Actions to run them on every pull request"; "Designed the drag-and-drop schedule view and made it work on phones"):
+
+| Role | Rewritten bullet |
+|---|---|
+| Backend | Built the Flask and SQLite back end of a course planner used by 300 students, with SQL queries loading 1,200 catalog courses |
+| Frontend | Designed the drag-and-drop schedule view in React and made it work on phones, for a course planner used by 300 students |
+| Testing / DevOps | Set up GitHub Actions to run 85 pytest unit tests on every pull request for a React and Flask app used by 300 students |
+| Data | Wrote SQL queries to load 1,200 courses from the public catalog into SQLite, the data behind a planner used by 300 students |
+
+"Back end" in the first row is only fine if the master shows the user worked on that part. When the master just says "Built ... in React and Flask" for a solo project, it does; for a team project, check the master for the user's part first.
+
+Two versions for different roles should read differently. If you'd send the same lines to a backend team and a mobile team, it isn't tailored yet.
 
 ## Page and section order
 
@@ -65,12 +98,12 @@ Projects are often the strongest evidence a student has.
 
 - Choose the two to four projects that best match the posting. Leave out ones that show nothing it asks for.
 - In each project's heading, list the tools the posting mentions first, but only tools the project really used.
-- One to three bullets each: what was built, the user's part, and a result if the master has one (users, scale, speed, accuracy).
+- One to three bullets each, rewritten for this posting (see "Rewrite every kept bullet"): what was built, the user's part, and a result if the master has one (users, scale, speed, accuracy). The first bullet should show the project's strongest link to the posting.
 - Group and class projects: describe the user's own part ("Implemented the prerequisite checker for a 4-person class project"), never the team's whole result as if it were theirs. Labeling something a class project is fine; recruiters expect it.
 
 ## Experience
 
-- Internships, research and technical jobs: order bullets by relevance to the posting and use its vocabulary where it fits what the user did.
+- Internships, research and technical jobs: order bullets by relevance to the posting, and rewrite them to lead with its vocabulary wherever that's true to what the user did (see "Rewrite every kept bullet").
 - Part-time and campus jobs (retail, food service, tutoring, campus IT): keep one or two bullets showing transferable skills the posting asks for, such as communication, working under time pressure, training others or handling money. Don't drop these entirely for a student with little other experience; they show reliability.
 
 ## Skills
@@ -89,7 +122,9 @@ If the posting wants something the user doesn't have, it goes in the gaps list i
 
 ## Mapping vocabulary honestly
 
-The test: would the user's professor, teammate or manager read the new line and agree it describes what they did?
+Rewording is expected; these are its limits. The test: would the user's professor, teammate or manager read the new line and agree it describes what they did?
+
+`check_resume.py` flags words the master doesn't contain. When a flagged word is the posting's term for something the master shows (for example "REST API" for a master bullet about Flask endpoints), it's a fair rewording: keep it and list it under "Reworded" in changes.md. When it names a tool, number or responsibility the master doesn't have, remove it.
 
 | Master says | Posting asks for | Good | Not allowed |
 |---|---|---|---|
@@ -131,11 +166,18 @@ If the master itself uses a two-column or icon-heavy template, keep its look in 
 ```
 # Tailoring notes: Role at Company
 
+## Angle
+<the three to five things this posting judges on, in its own words>
+
 ## What changed
 - Coursework: led with <courses> (posting asks for <requirement>).
 - Projects: moved <project> to the top; dropped <project> for space.
-- <Job or project>: reworded <bullet> to use "<posting term>".
 - Skills: put <tools> first.
+
+## Reworded
+- <master bullet> → <tailored bullet> (why: <which part of the angle it shows>)
+- <master bullet> + <master bullet> → <merged bullet>
+(From compare_bullets.py: every bullet marked reworded or merged. Unchanged ones aren't listed.)
 
 ## Requirements covered
 - <requirement>: <where it shows on the resume>
@@ -148,4 +190,4 @@ If the master itself uses a two-column or icon-heavy template, keep its look in 
 - <requirement>: not on the resume. One way to address it: <cover letter line, interview example, a short project or course before the interview>.
 ```
 
-Keep it short. The user reads it to decide whether to trust this version.
+Keep it short. The user reads it to decide whether to trust this version, and the Reworded list lets them check each changed line against the master at a glance.
