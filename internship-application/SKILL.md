@@ -153,10 +153,18 @@ Show the main changes in a few lines, eligibility notes, gaps, the PDF path and 
 
 Open the form. If the site offers "Autofill from resume" (Workday does), accept it first. Then use the AutoInternship extension if the page has its button. It fills the predictable fields in one click and tells you what's left, which saves a lot of time and tokens.
 
+**Keep browser work cheap.** A screenshot or a whole-page read costs far more than anything else in a step, and a Workday application has five or more steps. So:
+
+- Read only the report panel: find the element labeled "AutoInternship report" and read just that (in Claude in Chrome, `find`, then `read_page` on its reference). Read the whole page text only if that fails.
+- Find fields from the page's list of form controls (`read_page` with the interactive filter, or `find` for one field), not from screenshots. Set values directly on the element (`form_input`) instead of clicking and typing. Custom dropdowns still need a click to open them and a click on the option.
+- Take one screenshot per page or step, after filling it and before Save and Continue, to check that nothing is red or empty. Take another only when something didn't take.
+- Don't read the posting again on the application page; it's in job-posting.md.
+- After Save and Continue, wait for the next step's heading (a short `find`) before clicking the Fill button again, rather than screenshotting the loading page.
+
 **With the Fill button.** The user's Chrome shows a green **Fill with AutoInternship** tab on the right edge of application pages from supported sites (Greenhouse, Lever, Ashby, Workday and others). If the form is embedded from one of them, the tab is on the right edge of the embedded form.
 
 1. Click it. A panel opens under it, starting "AutoInternship report: filled N, left M."
-2. Read the panel from the page text (or a screenshot, if the text doesn't include it). It has three parts:
+2. Read the panel as above (or from the page text, or a screenshot, if that doesn't work). It has three parts:
    - **Left for you or Claude**: one line per remaining field, with its kind, `*` if required, and up to 8 of its choices.
    - **Filled**: what it just entered, as `Label = value` pairs.
    - **Already filled**: what was there before, for example from the site's own resume parsing.
