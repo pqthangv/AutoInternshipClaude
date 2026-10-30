@@ -1,6 +1,6 @@
 /* Injects autofill.js into a tab, runs it, and adds up the results. Used by the popup, the keyboard
-   shortcut and the Claude bridge.
-     opts.frameId     fill only this frame (the bridge fills the frame that asked); otherwise every
+   shortcut and the Fill button on the page (bridge.js).
+     opts.frameId     fill only this frame (the Fill button fills the frame it's in); otherwise every
                       frame AutoInternship is allowed to touch
      opts.skipResume  don't attach the stored resume (Claude attaches one tailored to the job) */
 async function runFill(tabId, opts = {}) {

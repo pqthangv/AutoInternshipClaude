@@ -2,13 +2,6 @@ const $ = (s) => document.querySelector(s);
 const IS_EDGE = navigator.userAgent.includes('Edg/');
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-function flash(btn, text) {
-  const original = btn.dataset.label || btn.textContent;
-  btn.dataset.label = original;
-  btn.textContent = text;
-  setTimeout(() => { btn.textContent = original; }, 1600);
-}
-
 function showResult(r) {
   $('#legend').classList.add('done');
   $('#filledText').textContent = r.filled ? `${count(r.filled, 'field', 'fields')} filled` : 'Nothing filled';
@@ -17,7 +10,7 @@ function showResult(r) {
   const notes = [];
   if (r.resume) notes.push(`Attached ${r.resume}.`);
   if (!r.filled && !r.left) notes.push('No form fields found here. If the form opens in a pop-up, open it first, then fill again.');
-  else if (r.left) notes.push('Open the Claude side panel and run your saved prompt to finish the rest.');
+  else if (r.left) notes.push('Fill the amber fields yourself, or let Claude finish them.');
   $('#note').textContent = notes.join(' ');
   $('#note').hidden = !notes.length;
 }
@@ -63,20 +56,6 @@ async function init() {
       btn.disabled = false;
       btn.textContent = 'Fill again';
     }
-  });
-
-  $('#copyPrompt').addEventListener('click', async (e) => {
-    try {
-      await navigator.clipboard.writeText(AutoInternship.buildPrompt(profile));
-      flash(e.currentTarget, 'Copied. Paste it in the Claude side panel');
-    } catch (_) {
-      flash(e.currentTarget, 'Copy failed. Use Edit profile instead');
-    }
-  });
-
-  $('#downloadSkill').addEventListener('click', (e) => {
-    AutoInternship.download(`${AutoInternship.SKILL_NAME}.zip`, AutoInternship.skillZip(profile));
-    flash(e.currentTarget, 'Downloaded');
   });
 
   chrome.commands.getAll((cmds) => {

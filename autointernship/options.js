@@ -23,14 +23,9 @@ async function save() {
   try {
     await chrome.storage.local.set({ profile });
     setStatus('Saved', true);
-    updatePreview();
   } catch (err) {
     setStatus(`Not saved: ${err.message}`, false);
   }
-}
-
-function updatePreview() {
-  $('#preview').textContent = AutoInternship.buildPrompt(profile);
 }
 
 /* ---------- Rendering ---------- */
@@ -57,12 +52,10 @@ function renderList(kind) {
 function renderAll() {
   renderFields();
   LISTS.forEach(renderList);
-  renderClaudeFill();
-  updatePreview();
 }
 
-// The self-identification dropdowns get their choices from shared.js, so this page and Claude's prompt
-// use the same words. Runs before the first render, so saved choices show up.
+// The self-identification dropdowns get their choices from shared.js, where autofill.js's matching
+// codes are listed too. Runs before the first render, so saved choices show up.
 document.querySelectorAll('select[data-choices]').forEach((sel) => {
   for (const [value, text] of Object.entries(AutoInternship.SELF_ID_LABELS[sel.dataset.choices])) sel.add(new Option(text, value));
 });
@@ -172,7 +165,21 @@ $('#resumeRemove').addEventListener('click', async () => {
   renderResume();
 });
 
-/* ---------- Claude exports ---------- */
+/* ---------- Fill button ---------- */
+
+// Whether bridge.js shows the "Fill with AutoInternship" button on application pages. It's a setting of
+// this browser, not part of your profile, so it's stored separately and isn't in the backup. On by default.
+async function renderFillButton() {
+  const { settings } = await chrome.storage.local.get('settings');
+  $('#fillButton').checked = !settings || settings.fillButton !== false;
+}
+
+$('#fillButton').addEventListener('change', async (e) => {
+  const { settings } = await chrome.storage.local.get('settings');
+  await chrome.storage.local.set({ settings: { ...(settings || {}), fillButton: e.target.checked } });
+});
+
+/* ---------- Backup ---------- */
 
 function flash(btn, text) {
   const original = btn.dataset.label || btn.textContent;
@@ -180,38 +187,6 @@ function flash(btn, text) {
   btn.textContent = text;
   setTimeout(() => { btn.textContent = original; }, 1600);
 }
-
-$('#copyPrompt').addEventListener('click', async (e) => {
-  const btn = e.currentTarget;
-  try {
-    await navigator.clipboard.writeText(AutoInternship.buildPrompt(profile));
-    flash(btn, 'Copied');
-  } catch (_) {
-    $('.preview').open = true;
-    flash(btn, 'Copy failed. Select the preview below');
-  }
-});
-
-$('#downloadSkill').addEventListener('click', (e) => {
-  AutoInternship.download(`${AutoInternship.SKILL_NAME}.zip`, AutoInternship.skillZip(profile));
-  flash(e.currentTarget, 'Downloaded');
-});
-
-/* ---------- Let Claude start fills ---------- */
-
-// Turning this on saves a new random key in your profile, so it's also in your backup (profile.json),
-// where the skill reads it. The bridge only fills when a request carries this key (see background.js),
-// so other pages can't start a fill. Turning it off clears the key, and turning it on again makes a new one.
-function renderClaudeFill() {
-  $('#claudeFill').checked = !!profile.claudeKey;
-}
-
-$('#claudeFill').addEventListener('change', (e) => {
-  profile.claudeKey = e.target.checked ? crypto.randomUUID() : '';
-  scheduleSave();
-});
-
-/* ---------- Backup ---------- */
 
 // Named profile.json because that's the file the internship-application skill reads from the job-search folder.
 $('#exportJson').addEventListener('click', (e) => {
@@ -230,7 +205,7 @@ $('#importJson').addEventListener('change', async (e) => {
   try {
     const data = JSON.parse(await file.text());
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('not a profile');
-    const next = Object.assign(AutoInternship.defaults(), data);
+    const next = AutoInternship.tidyProfile(Object.assign(AutoInternship.defaults(), data));
     for (const kind of LISTS) {
       next[kind] = Array.isArray(next[kind])
         ? next[kind].filter((x) => x && typeof x === 'object').map((x) => Object.assign(AutoInternship.blank[kind](), x))
@@ -249,8 +224,9 @@ $('#importJson').addEventListener('change', async (e) => {
 
 (async () => {
   const { profile: stored } = await chrome.storage.local.get('profile');
-  profile = Object.assign(AutoInternship.defaults(), stored || {});
+  profile = AutoInternship.tidyProfile(Object.assign(AutoInternship.defaults(), stored || {}));
   for (const kind of LISTS) if (!Array.isArray(profile[kind])) profile[kind] = [];
   renderAll();
   renderResume();
+  renderFillButton();
 })();

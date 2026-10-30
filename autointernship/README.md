@@ -20,13 +20,13 @@ Fill in the profile page once. Put your current school first under Education. At
 
 ## Fill an application
 
-Open the form and click **Fill this page** in the popup, or press **Alt+Shift+F**. On forms with several steps (Workday's **Save and Continue**), fill again on each step. Running it twice is safe.
+Click **Fill with AutoInternship** on the right edge of the application page. A panel lists what was filled, what was already filled and what's left. You can also use **Fill this page** in the popup or **Alt+Shift+F**; those also attach your stored resume, but the page button doesn't.
+
+On forms with several steps (Workday's **Save and Continue**), fill again on each step. Running it twice is safe.
 
 ## Use with Claude
 
-- **With the internship-application skill (recommended):** turn on **Let Claude start fills** on the profile page, then download the backup again into your job-search folder. Claude can then start a fill itself on each page and step, and works only on what's left. It's faster and uses far fewer tokens.
-- **Saved prompt:** **Copy Claude prompt**, paste it into the Claude side panel and save it as a shortcut. Run it after each fill.
-- **Claude skill:** **Download Claude skill** and upload the zip under **Customize → Skills** in Claude.
+The `internship-application` skill in this repo reads your answers from `profile.json` and clicks the Fill button itself on each page. Then it reads the panel and works only on what's left, which is faster and uses far fewer tokens than filling every field.
 
 ## What it fills
 
@@ -40,13 +40,13 @@ It always leaves these for you or Claude: open-ended questions, cover letters, c
 
 ## Privacy
 
-Your profile and resume stay in this browser. AutoInternship makes no network requests. It runs on the application sites listed in `manifest.json` (Greenhouse, Lever, Ashby, Workday and others), and only starts a fill for Claude when **Let Claude start fills** is on and the request carries your key. Some job sites restrict automated tools in their terms, so review every application before you submit it.
+Your profile and resume stay in this browser. AutoInternship makes no network requests. The Fill button appears only on the application sites listed in `manifest.json` (Greenhouse, Lever, Ashby, Workday and others), and only a real click starts a fill, so a web page can't start one by itself. You can hide the button on the profile page. Some job sites restrict automated tools in their terms, so review every application before you submit it.
 
 ## If something goes wrong
 
 - **Nothing happens on an embedded form:** open the form on its own page.
 - **A field stayed amber or didn't stick:** pick it yourself or let Claude. Add a saved answer for questions you see often.
-- **Claude says fills are off or the key is wrong:** turn on **Let Claude start fills** and download the backup again. If you just reloaded the extension, reload the page too.
+- **No Fill button:** it shows only on the listed sites, once the page has a form. Check it's turned on in the profile page. If you just reloaded the extension, reload the page too.
 - **Resume didn't attach:** some sites block scripted uploads. Attach it yourself.
 
-For developers: field matching is the `RULES` list in `autofill.js`, and the Claude message format is at the top of `bridge.js`.
+For developers: field matching is the `RULES` list in `autofill.js`, and the Fill button and report panel are in `bridge.js`.

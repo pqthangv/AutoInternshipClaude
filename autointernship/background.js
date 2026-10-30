@@ -1,4 +1,4 @@
-/* Keyboard shortcut, first-run setup, and fills Claude asks for through the bridge. */
+/* Keyboard shortcut, first-run setup, and fills started from the Fill button on the page (bridge.js). */
 importScripts('runner.js');
 
 chrome.runtime.onInstalled.addListener(({ reason }) => {
@@ -15,17 +15,14 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   }
 });
 
-// The Claude bridge (bridge.js) can't inject autofill.js itself, so it asks here. A fill only runs when
-// "Let Claude start fills" is on (which saves a random claudeKey in your profile) and the request carries
-// that key, so other pages can't start one. It fills only the frame that asked, and never attaches the
-// stored resume, because Claude attaches a resume tailored to each job.
+// The Fill button (bridge.js) can't inject autofill.js itself, so it asks here after a real click.
+// Only AutoInternship's own scripts can send this message; web pages can't. It fills only the frame
+// that asked, and never attaches the stored resume, because Claude attaches one tailored to each job.
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!msg || msg.type !== 'autointernship:fill' || !sender.tab) return false;
   (async () => {
-    const { profile } = await chrome.storage.local.get('profile');
-    const key = profile && profile.claudeKey;
-    if (!key) return reply({ ok: false, error: 'Claude fills are off. Turn on "Let Claude start fills" on the AutoInternship profile page.' });
-    if (msg.key !== key) return reply({ ok: false, error: 'Wrong key. Download the AutoInternship backup (profile.json) again and put it in the job-search folder.' });
+    const { settings } = await chrome.storage.local.get('settings');
+    if (settings && settings.fillButton === false) return reply({ ok: false, error: 'The Fill button is turned off on the AutoInternship profile page.' });
     const r = await runFill(sender.tab.id, { frameId: sender.frameId, skipResume: true });
     badge(sender.tab.id, String(r.filled), '#1E7B4E');
     reply({ ok: true, ...r });

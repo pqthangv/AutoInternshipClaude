@@ -25,14 +25,14 @@
       <a href="#self-id">Voluntary self-identification</a>
       <a href="#answers">Saved answers</a>
       <a href="#claude-rules">Instructions for Claude</a>
-      <a href="#use-claude">Use with Claude</a>
+      <a href="#fill-button">Fill button</a>
       <a href="#backup">Backup</a>
     </nav>
 
     <main>
       <div class="intro">
         <h1>Your application profile</h1>
-        <p>Fill this in once. AutoInternship uses it to fill job applications, and Claude uses it to answer the questions AutoInternship can’t. Everything stays in this browser.</p>
+        <p>Fill this in once. AutoInternship uses it to fill job applications, and Claude reads the same answers from your backup (profile.json). Nothing leaves this browser unless you download the backup.</p>
       </div>
 
       <section id="you">
@@ -177,32 +177,20 @@
 
       <section id="claude-rules">
         <h2>Instructions for Claude</h2>
-        <p class="lede">AutoInternship already tells Claude to use only your facts, leave demographic questions you haven’t answered and stop before submitting. Add anything else here.</p>
+        <p class="lede">The internship-application skill reads these from your backup (profile.json) when it writes answers for you.</p>
         <div class="grid">
           <label class="field wide"><span>How you write</span><textarea data-key="writingStyle" rows="3" placeholder="Plain and direct. Short sentences. No buzzwords. Mention specific results with numbers."></textarea></label>
           <label class="field wide"><span>Extra rules, one per line</span><textarea data-key="extraRules" rows="3" placeholder="Never say I’m open to relocation for roles outside California."></textarea></label>
         </div>
       </section>
 
-      <section id="use-claude">
-        <h2>Use with Claude</h2>
-        <p class="lede">AutoInternship never talks to Claude itself. Pick one of these and Claude in Chrome will have your profile when you ask it to finish an application.</p>
+      <section id="fill-button">
+        <h2>Fill button</h2>
+        <p class="lede">Application pages get a small “Fill with AutoInternship” button on the right edge. You or Claude click it, and a panel lists what was filled and what’s left, so Claude only works on the rest. It never attaches your stored resume, because Claude attaches one tailored to each job (the popup and shortcut still do).</p>
         <div class="action">
-          <button type="button" class="btn primary" id="copyPrompt">Copy Claude prompt</button>
-          <p>Paste it into the Claude side panel, then save it as a shortcut so you can run it again by typing /.</p>
+          <label class="switch"><input type="checkbox" id="fillButton"> Show the Fill button on application pages</label>
+          <p>Only a real click starts a fill, so a web page can’t start one by itself.</p>
         </div>
-        <div class="action">
-          <button type="button" class="btn" id="downloadSkill">Download Claude skill</button>
-          <p>In Claude, go to Customize, then Skills, and upload the .zip. Claude loads it whenever you work on an application. Download it again after you change your profile.</p>
-        </div>
-        <div class="action">
-          <label class="switch"><input type="checkbox" id="claudeFill"> Let Claude start fills</label>
-          <p>For the internship-application skill. Claude can’t press AutoInternship’s shortcut, so with this on, Claude can ask AutoInternship to fill the page instead and get back a list of what it filled and what’s left. Only a request with your key works. The key is saved in your profile, so after turning this on, download your backup again (profile.json) and put it in your job-search folder. When Claude asks, AutoInternship never attaches your stored resume, because Claude attaches one tailored to the job.</p>
-        </div>
-        <details class="preview">
-          <summary>Preview what Claude will see</summary>
-          <pre id="preview"></pre>
-        </details>
       </section>
 
       <section id="backup">

@@ -159,7 +159,7 @@ body.popup { width: 320px; font-size: 14px; }
 .pop-head .brand-name { flex: 1; font-family: var(--serif); font-weight: 600; font-size: 16px; }
 .pop-body { padding: 16px; }
 .pop-body h1 { font-size: 19px; margin-bottom: 6px; }
-.pop-body > section, .pop-body .claude { border: 0; padding: 0; }
+.pop-body > section { border: 0; padding: 0; }
 .who { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
 .who strong { color: var(--ink); font-weight: 600; }
 .btn.big { width: 100%; min-height: 44px; font-size: 15px; justify-content: center; }
@@ -173,8 +173,5 @@ body.popup { width: 320px; font-size: 14px; }
 .note { margin-top: 12px; font-size: 13px; color: var(--muted); }
 .error { margin-top: 12px; font-size: 13px; color: var(--danger); }
 
-.pop-body .claude { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
-.claude h2 { font-size: 15px; margin-bottom: 8px; }
-.claude .btn { width: 100%; justify-content: flex-start; margin-top: 6px; }
 .pop-foot { padding: 10px 16px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 .pop-foot .link-btn { font-size: 12px; }
