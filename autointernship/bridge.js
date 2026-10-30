@@ -46,8 +46,11 @@
     css(panel, 'display: none; width: 340px; max-height: 50vh; overflow: auto; margin-top: 6px; padding: 10px 12px; background: #fff; color: #1d1d1b; border: 1px solid #ccc; border-radius: 8px 0 0 8px; box-shadow: 0 2px 10px rgba(0,0,0,.2); white-space: pre-wrap;');
 
     root.append(button, panel);
-    document.documentElement.appendChild(root);
+    attach();
   }
+
+  // Inside <body>, so the report is part of the page text Claude reads (text outside <body> is often skipped).
+  const attach = () => (document.body || document.documentElement).appendChild(root);
 
   async function run(button) {
     button.disabled = true;
@@ -90,14 +93,17 @@
     panel.style.display = 'block';
   }
 
-  // Shows the button once the frame has a form (forms often load after the page), or hides it when the
-  // switch is turned off.
+  // While the switch is on, checks every 1.5 seconds: shows the button once the frame has a form (forms
+  // often load after the page), and puts it back if the site redraws the page and drops it (single-page
+  // sites like Workday can, between steps). Turning the switch off removes it.
   function update(on) {
     clearInterval(timer);
     if (!on) { if (root) root.remove(); root = null; return; }
-    const check = () => { if (!root && hasForm()) build(); if (root) clearInterval(timer); };
+    const check = () => {
+      if (!root) { if (hasForm()) build(); } else if (!root.isConnected) attach();
+    };
     check();
-    if (!root) timer = setInterval(check, 1500);
+    timer = setInterval(check, 1500);
   }
 
   const isOn = (settings) => !settings || settings.fillButton !== false;
