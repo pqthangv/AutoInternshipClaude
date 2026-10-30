@@ -2,7 +2,7 @@ const $ = (s, root = document) => root.querySelector(s);
 const LISTS = ['work', 'projects', 'education', 'savedAnswers'];
 const MAX_RESUME = 4 * 1024 * 1024;
 
-let profile = Applyfile.defaults();
+let profile = AutoInternship.defaults();
 let saveTimer = null;
 
 /* ---------- Saving ---------- */
@@ -30,7 +30,7 @@ async function save() {
 }
 
 function updatePreview() {
-  $('#preview').textContent = Applyfile.buildPrompt(profile);
+  $('#preview').textContent = AutoInternship.buildPrompt(profile);
 }
 
 /* ---------- Rendering ---------- */
@@ -57,8 +57,15 @@ function renderList(kind) {
 function renderAll() {
   renderFields();
   LISTS.forEach(renderList);
+  renderClaudeFill();
   updatePreview();
 }
+
+// The self-identification dropdowns get their choices from shared.js, so this page and Claude's prompt
+// use the same words. Runs before the first render, so saved choices show up.
+document.querySelectorAll('select[data-choices]').forEach((sel) => {
+  for (const [value, text] of Object.entries(AutoInternship.SELF_ID_LABELS[sel.dataset.choices])) sel.add(new Option(text, value));
+});
 
 /* ---------- Editing ---------- */
 
@@ -79,7 +86,7 @@ document.addEventListener('click', (e) => {
   const add = e.target.closest('[data-add]');
   if (add) {
     const kind = add.dataset.add;
-    profile[kind].push(Applyfile.blank[kind]());
+    profile[kind].push(AutoInternship.blank[kind]());
     renderList(kind);
     const entries = $(`[data-list="${kind}"]`).children;
     const first = entries[entries.length - 1].querySelector('input, textarea');
@@ -122,7 +129,7 @@ async function renderResume() {
     name.textContent = resume.name;
     const meta = document.createElement('span');
     meta.className = 'file-meta';
-    meta.textContent = `  ${Applyfile.prettyBytes(resume.size || 0)}`;
+    meta.textContent = `  ${AutoInternship.prettyBytes(resume.size || 0)}`;
     info.append(name, meta);
     $('#resumePick').textContent = 'Replace file';
   } else {
@@ -148,7 +155,7 @@ $('#resumeFile').addEventListener('change', async (e) => {
   if (!file) return;
   resumeError('');
   if (file.size > MAX_RESUME) {
-    resumeError(`${file.name} is ${Applyfile.prettyBytes(file.size)}. Use a file under 4 MB, such as a PDF export without large images.`);
+    resumeError(`${file.name} is ${AutoInternship.prettyBytes(file.size)}. Use a file under 4 MB, such as a PDF export without large images.`);
     return;
   }
   try {
@@ -177,7 +184,7 @@ function flash(btn, text) {
 $('#copyPrompt').addEventListener('click', async (e) => {
   const btn = e.currentTarget;
   try {
-    await navigator.clipboard.writeText(Applyfile.buildPrompt(profile));
+    await navigator.clipboard.writeText(AutoInternship.buildPrompt(profile));
     flash(btn, 'Copied');
   } catch (_) {
     $('.preview').open = true;
@@ -186,15 +193,30 @@ $('#copyPrompt').addEventListener('click', async (e) => {
 });
 
 $('#downloadSkill').addEventListener('click', (e) => {
-  Applyfile.download(`${Applyfile.SKILL_NAME}.zip`, Applyfile.skillZip(profile));
+  AutoInternship.download(`${AutoInternship.SKILL_NAME}.zip`, AutoInternship.skillZip(profile));
   flash(e.currentTarget, 'Downloaded');
+});
+
+/* ---------- Let Claude start fills ---------- */
+
+// Turning this on saves a new random key in your profile, so it's also in your backup (profile.json),
+// where the skill reads it. The bridge only fills when a request carries this key (see background.js),
+// so other pages can't start a fill. Turning it off clears the key, and turning it on again makes a new one.
+function renderClaudeFill() {
+  $('#claudeFill').checked = !!profile.claudeKey;
+}
+
+$('#claudeFill').addEventListener('change', (e) => {
+  profile.claudeKey = e.target.checked ? crypto.randomUUID() : '';
+  scheduleSave();
 });
 
 /* ---------- Backup ---------- */
 
+// Named profile.json because that's the file the internship-application skill reads from the job-search folder.
 $('#exportJson').addEventListener('click', (e) => {
   const blob = new Blob([JSON.stringify(profile, null, 2)], { type: 'application/json' });
-  Applyfile.download('applyfile-profile.json', blob);
+  AutoInternship.download('profile.json', blob);
   flash(e.currentTarget, 'Downloaded');
 });
 
@@ -208,10 +230,10 @@ $('#importJson').addEventListener('change', async (e) => {
   try {
     const data = JSON.parse(await file.text());
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('not a profile');
-    const next = Object.assign(Applyfile.defaults(), data);
+    const next = Object.assign(AutoInternship.defaults(), data);
     for (const kind of LISTS) {
       next[kind] = Array.isArray(next[kind])
-        ? next[kind].filter((x) => x && typeof x === 'object').map((x) => Object.assign(Applyfile.blank[kind](), x))
+        ? next[kind].filter((x) => x && typeof x === 'object').map((x) => Object.assign(AutoInternship.blank[kind](), x))
         : [];
     }
     profile = next;
@@ -219,7 +241,7 @@ $('#importJson').addEventListener('change', async (e) => {
     await save();
     note.textContent = `Restored from ${file.name}.`;
   } catch (_) {
-    note.textContent = `${file.name} isn’t an Applyfile backup. Choose the .json file you downloaded from this page.`;
+    note.textContent = `${file.name} isn’t an AutoInternship backup. Choose the .json file you downloaded from this page.`;
   }
 });
 
@@ -227,7 +249,7 @@ $('#importJson').addEventListener('change', async (e) => {
 
 (async () => {
   const { profile: stored } = await chrome.storage.local.get('profile');
-  profile = Object.assign(Applyfile.defaults(), stored || {});
+  profile = Object.assign(AutoInternship.defaults(), stored || {});
   for (const kind of LISTS) if (!Array.isArray(profile[kind])) profile[kind] = [];
   renderAll();
   renderResume();

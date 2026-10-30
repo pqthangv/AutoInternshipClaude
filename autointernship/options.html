@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Applyfile profile</title>
+  <title>AutoInternship profile</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><img src="icons/icon48.png" width="24" height="24" alt="">Applyfile</div>
+    <div class="brand"><img src="icons/icon48.png" width="24" height="24" alt="">AutoInternship</div>
     <p class="save-status saved" id="saveStatus" aria-live="polite">Changes save automatically</p>
   </header>
 
@@ -22,6 +22,7 @@
       <a href="#projects">Projects</a>
       <a href="#resume">Resume and skills</a>
       <a href="#eligibility">Eligibility and preferences</a>
+      <a href="#self-id">Voluntary self-identification</a>
       <a href="#answers">Saved answers</a>
       <a href="#claude-rules">Instructions for Claude</a>
       <a href="#use-claude">Use with Claude</a>
@@ -31,7 +32,7 @@
     <main>
       <div class="intro">
         <h1>Your application profile</h1>
-        <p>Fill this in once. Applyfile uses it to fill job applications, and Claude uses it to answer the questions Applyfile can’t. Everything stays in this browser.</p>
+        <p>Fill this in once. AutoInternship uses it to fill job applications, and Claude uses it to answer the questions AutoInternship can’t. Everything stays in this browser.</p>
       </div>
 
       <section id="you">
@@ -55,7 +56,7 @@
 
       <section id="links">
         <h2>Links</h2>
-        <p class="lede">Full URLs work best, but Applyfile adds https:// if you leave it off.</p>
+        <p class="lede">Full URLs work best, but AutoInternship adds https:// if you leave it off.</p>
         <div class="grid">
           <label class="field"><span>LinkedIn</span><input data-key="linkedin" placeholder="linkedin.com/in/your-name"></label>
           <label class="field"><span>GitHub</span><input data-key="github" placeholder="github.com/your-name"></label>
@@ -114,7 +115,7 @@
 
       <section id="resume">
         <h2>Resume and skills</h2>
-        <p class="lede">Applyfile attaches this file wherever a form asks for a resume or CV. If you write your resume in Overleaf, use Download PDF there and choose that file.</p>
+        <p class="lede">AutoInternship attaches this file wherever a form asks for a resume or CV. If you write your resume in Overleaf, use Download PDF there and choose that file.</p>
         <div class="file-row">
           <div id="resumeInfo"><span class="file-meta">No resume attached yet.</span></div>
           <button type="button" class="btn" id="resumePick">Choose file</button>
@@ -131,13 +132,19 @@
 
       <section id="eligibility">
         <h2>Eligibility and preferences</h2>
-        <p class="lede">Used for yes-or-no questions. If a question names a different country than yours, Applyfile leaves it for you.</p>
+        <p class="lede">Used for yes-or-no questions. If a question names a different country than yours, AutoInternship leaves it for you. Sponsorship questions about now or the future use the first sponsorship answer, and questions only about the internship use the second. A question that could mean either is filled only when both answers are the same.</p>
         <div class="grid">
           <label class="field"><span>Legally authorized to work</span>
             <select data-key="workAuthorized"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
           <label class="field"><span>In which country</span><input data-key="authCountry" placeholder="United States"></label>
           <label class="field"><span>Need visa sponsorship, now or later</span>
             <select data-key="needsSponsorship"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>Need sponsorship for the internship itself</span>
+            <select data-key="needsSponsorshipForInternship"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>Current or former government employee or official</span>
+            <select data-key="governmentEmployee"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>A close relative is a government official or employee</span>
+            <select data-key="governmentRelative"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
           <label class="field"><span>Willing to relocate</span>
             <select data-key="willingToRelocate"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
           <label class="field"><span>Salary expectation</span><input data-key="salary" placeholder="$150,000 to $170,000"></label>
@@ -146,9 +153,23 @@
         </div>
       </section>
 
+      <section id="self-id">
+        <h2>Voluntary self-identification</h2>
+        <p class="lede">Many U.S. applications end with these optional questions. AutoInternship answers one only with the choice you make here, and only when the form offers a matching option. Leave a question on “Not set” and AutoInternship leaves it for you. Some forms (Workday, for example) ask Hispanic or Latino and race in one list, so set both. Questions about pronouns, sexual orientation or transgender identity are always left for you.</p>
+        <div class="grid">
+          <!-- The choices come from SELF_ID_LABELS in shared.js (options.js adds them). -->
+          <label class="field"><span>Gender</span><select data-key="gender" data-choices="gender"><option value="">Not set</option></select></label>
+          <label class="field"><span>Hispanic or Latino</span><select data-key="hispanicLatino" data-choices="hispanicLatino"><option value="">Not set</option></select></label>
+          <label class="field"><span>Race</span><select data-key="race" data-choices="race"><option value="">Not set</option></select></label>
+          <label class="field"><span>Veteran status</span><select data-key="veteranStatus" data-choices="veteranStatus"><option value="">Not set</option></select></label>
+          <label class="field"><span>Disability</span><select data-key="disabilityStatus" data-choices="disabilityStatus"><option value="">Not set</option></select></label>
+          <label class="field"><span>Identify as LGBTQ+</span><select data-key="lgbtq" data-choices="lgbtq"><option value="">Not set</option></select></label>
+        </div>
+      </section>
+
       <section id="answers">
         <h2>Saved answers</h2>
-        <p class="lede">When a question contains your phrase, Applyfile fills in your answer. These take priority over everything else, and Claude sees them too.</p>
+        <p class="lede">When a question contains your phrase, AutoInternship fills in your answer. These take priority over everything else, and Claude sees them too.</p>
         <p class="list-empty" data-empty="savedAnswers">No saved answers yet. A good first one: “how did you hear” → “LinkedIn”.</p>
         <div data-list="savedAnswers"></div>
         <button type="button" class="btn" data-add="savedAnswers">Add saved answer</button>
@@ -156,7 +177,7 @@
 
       <section id="claude-rules">
         <h2>Instructions for Claude</h2>
-        <p class="lede">Applyfile already tells Claude to use only your facts, skip demographic questions and stop before submitting. Add anything else here.</p>
+        <p class="lede">AutoInternship already tells Claude to use only your facts, leave demographic questions you haven’t answered and stop before submitting. Add anything else here.</p>
         <div class="grid">
           <label class="field wide"><span>How you write</span><textarea data-key="writingStyle" rows="3" placeholder="Plain and direct. Short sentences. No buzzwords. Mention specific results with numbers."></textarea></label>
           <label class="field wide"><span>Extra rules, one per line</span><textarea data-key="extraRules" rows="3" placeholder="Never say I’m open to relocation for roles outside California."></textarea></label>
@@ -165,7 +186,7 @@
 
       <section id="use-claude">
         <h2>Use with Claude</h2>
-        <p class="lede">Applyfile never talks to Claude itself. Pick one of these and Claude in Chrome will have your profile when you ask it to finish an application.</p>
+        <p class="lede">AutoInternship never talks to Claude itself. Pick one of these and Claude in Chrome will have your profile when you ask it to finish an application.</p>
         <div class="action">
           <button type="button" class="btn primary" id="copyPrompt">Copy Claude prompt</button>
           <p>Paste it into the Claude side panel, then save it as a shortcut so you can run it again by typing /.</p>
@@ -173,6 +194,10 @@
         <div class="action">
           <button type="button" class="btn" id="downloadSkill">Download Claude skill</button>
           <p>In Claude, go to Customize, then Skills, and upload the .zip. Claude loads it whenever you work on an application. Download it again after you change your profile.</p>
+        </div>
+        <div class="action">
+          <label class="switch"><input type="checkbox" id="claudeFill"> Let Claude start fills</label>
+          <p>For the internship-application skill. Claude can’t press AutoInternship’s shortcut, so with this on, Claude can ask AutoInternship to fill the page instead and get back a list of what it filled and what’s left. Only a request with your key works. The key is saved in your profile, so after turning this on, download your backup again (profile.json) and put it in your job-search folder. When Claude asks, AutoInternship never attaches your stored resume, because Claude attaches one tailored to the job.</p>
         </div>
         <details class="preview">
           <summary>Preview what Claude will see</summary>
@@ -182,7 +207,7 @@
 
       <section id="backup">
         <h2>Backup</h2>
-        <p class="lede">The backup is a plain JSON file. It also works as profile.json if you run batches with Claude Code. Your resume file isn’t included.</p>
+        <p class="lede">The backup downloads as profile.json, the file the internship-application skill reads. Move it into your job-search folder (if your browser named it “profile (1).json”, rename it). Your resume file isn’t included.</p>
         <div class="action">
           <button type="button" class="btn" id="exportJson">Download backup</button>
           <p>Saves everything on this page.</p>

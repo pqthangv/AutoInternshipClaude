@@ -1,4 +1,4 @@
-/* Applyfile. The interface uses the same two marks it draws on job forms:
+/* AutoInternship. The interface uses the same two marks it draws on job forms:
    solid green for "filled from your profile", dashed amber for "still empty". */
 :root {
   --paper: #F2F4F7;
@@ -134,6 +134,8 @@ section h2 { font-size: 22px; }
 .action + .action { border-top: 1px dashed var(--line); }
 .action .btn { width: 100%; }
 .action p { color: var(--muted); font-size: 14px; padding-top: 7px; }
+.action .switch { display: flex; align-items: center; gap: 10px; padding-top: 7px; font-weight: 600; cursor: pointer; }
+.action .switch input { width: 18px; height: 18px; accent-color: var(--filled); margin: 0; }
 
 details.preview { margin-top: 18px; }
 details.preview summary { cursor: pointer; color: var(--muted); font-size: 14px; }

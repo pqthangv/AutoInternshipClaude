@@ -32,8 +32,8 @@ function showError(err) {
 
 async function init() {
   const { profile: stored } = await chrome.storage.local.get('profile');
-  const profile = Object.assign(Applyfile.defaults(), stored || {});
-  const empty = Applyfile.isEmpty(profile);
+  const profile = Object.assign(AutoInternship.defaults(), stored || {});
+  const empty = AutoInternship.isEmpty(profile);
   $('#emptyState').hidden = !empty;
   $('#ready').hidden = empty;
 
@@ -45,7 +45,7 @@ async function init() {
     const who = $('#who');
     who.append('Filling as ');
     const strong = document.createElement('strong');
-    strong.textContent = Applyfile.fullName(profile) || profile.email;
+    strong.textContent = AutoInternship.fullName(profile) || profile.email;
     who.append(strong);
   }
 
@@ -67,7 +67,7 @@ async function init() {
 
   $('#copyPrompt').addEventListener('click', async (e) => {
     try {
-      await navigator.clipboard.writeText(Applyfile.buildPrompt(profile));
+      await navigator.clipboard.writeText(AutoInternship.buildPrompt(profile));
       flash(e.currentTarget, 'Copied. Paste it in the Claude side panel');
     } catch (_) {
       flash(e.currentTarget, 'Copy failed. Use Edit profile instead');
@@ -75,7 +75,7 @@ async function init() {
   });
 
   $('#downloadSkill').addEventListener('click', (e) => {
-    Applyfile.download(`${Applyfile.SKILL_NAME}.zip`, Applyfile.skillZip(profile));
+    AutoInternship.download(`${AutoInternship.SKILL_NAME}.zip`, AutoInternship.skillZip(profile));
     flash(e.currentTarget, 'Downloaded');
   });
 
