@@ -10,7 +10,7 @@ Choosing which projects to keep is only the start. A resume that keeps the maste
 2. **Choose and order** what goes on the page (sections below): the entries that best show those things, strongest first.
 3. **Rewrite every kept bullet for that angle** (next section). This is the pass that makes it tailored.
 
-Then check it: `compare_bullets.py` (SKILL.md step 3) shows how many bullets are still word for word. When more than about half are, go back to pass 3. The exception is a posting whose language already matches the master's; say so in changes.md.
+Then check it: `check_tailored.py` (SKILL.md step 3) shows how many bullets are still word for word. When more than about half are, go back to pass 3. The exception is a posting whose language already matches the master's; say so in changes.md.
 
 ## Rewrite every kept bullet
 
@@ -60,7 +60,7 @@ The master can be any length, and may grow to several pages as the user adds to 
 
 **When the master is more than about two pages, select instead of cutting.** Start the tailored copy from what to keep, not from everything: the header, the education entry and coursework line, the two to four projects and the experience entries that best match the posting (with their most relevant bullets), one or two activities if they fit, and the skills section. Build it, then adjust: if the build reports 2 or more `free_lines`, add back as in "Filling the page" below; if it's over, trim as below. Choosing first is much faster than deleting most of a long document, and it keeps the focus on the posting.
 
-`ats_check.py` will list more keywords under `in_master_not_resume` as the master grows. That's expected: bring back the ones that matter most for this posting while staying on one page, and leave the rest.
+The check will list more keywords that are in the master but not on this page as the master grows. That's expected: bring back the ones that matter most for this posting while staying on one page, and leave the rest.
 
 **When the build reports `lines_over`**, cut about that many lines in one pass, in this order, then build again:
 
@@ -96,7 +96,7 @@ The build reports `free_lines`: about how many lines are still empty at the bott
 5. **One more activity**, if it shows something the posting asks for, such as teamwork, leadership or communication.
 6. **Awards last**: at most one line (see "Awards and honors").
 
-Every addition goes through the rewrite pass like the rest, so it points at this posting's angle and `compare_bullets.py` still passes. If a build spills onto page 2, take back the last addition or shorten a bullet to one line. Never pad with unrelated material, repeat a fact in two places, or stretch the spacing to fill. If you stop with 2 or more lines free, say why on the Page line in changes.md.
+Every addition goes through the rewrite pass like the rest, so it points at this posting's angle and the check still passes. If a build spills onto page 2, take back the last addition or shorten a bullet to one line. Never pad with unrelated material, repeat a fact in two places, or stretch the spacing to fill. If you stop with 2 or more lines free, say why on the Page line in changes.md.
 
 ## Education
 
@@ -137,7 +137,7 @@ If the posting wants something the user doesn't have, it goes in the gaps list i
 
 Rewording is expected; these are its limits. The test: would the user's professor, teammate or manager read the new line and agree it describes what they did?
 
-`check_resume.py` flags words the master doesn't contain. When a flagged word is the posting's term for something the master shows (for example "REST API" for a master bullet about Flask endpoints), it's a fair rewording: keep it and list it under "Reworded" in changes.md. When it names a tool, number or responsibility the master doesn't have, remove it.
+The check flags terms the master doesn't contain. When a flagged word is the posting's term for something the master shows (for example "REST API" for a master bullet about Flask endpoints), it's a fair rewording: keep it and list it under "Reworded" in changes.md. When it names a tool, number or responsibility the master doesn't have, remove it.
 
 | Master says | Posting asks for | Good | Not allowed |
 |---|---|---|---|
@@ -191,7 +191,7 @@ If the master itself uses a two-column or icon-heavy template, keep its look in 
 ## Reworded
 - <master bullet> → <tailored bullet> (why: <which part of the angle it shows>)
 - <master bullet> + <master bullet> → <merged bullet>
-(From compare_bullets.py: every bullet marked reworded or merged. Unchanged ones aren't listed.)
+(From the check's draft file: every bullet marked reworded or merged. Unchanged ones aren't listed.)
 
 ## Requirements covered
 - <requirement>: <where it shows on the resume>
