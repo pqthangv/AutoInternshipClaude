@@ -5,7 +5,7 @@ Usage:
   python check_resume.py MASTER CANDIDATE [--known profile.json ...] [--allow "Northwind" ...] [--resume]
 
 MASTER and CANDIDATE can be .tex, .pdf, .docx, .md or .txt. --known adds other files whose facts are
-the user's own (profile.json, an Applyfile backup). --allow adds words that are fine to introduce,
+the user's own (profile.json, an AutoInternship backup). --allow adds words that are fine to introduce,
 like the target company's name and the role title. --resume also checks that contact details (emails,
 phone numbers, LinkedIn and GitHub links) are unchanged.
 

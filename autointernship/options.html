@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoInternship profile</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><img src="icons/icon48.png" width="24" height="24" alt="">AutoInternship</div>
+    <p class="save-status saved" id="saveStatus" aria-live="polite">Changes save automatically</p>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Profile sections">
+      <a href="#you">You</a>
+      <a href="#links">Links</a>
+      <a href="#education">Education</a>
+      <a href="#student">Student and internship</a>
+      <a href="#work">Experience</a>
+      <a href="#projects">Projects</a>
+      <a href="#resume">Resume and skills</a>
+      <a href="#eligibility">Eligibility and preferences</a>
+      <a href="#self-id">Voluntary self-identification</a>
+      <a href="#answers">Saved answers</a>
+      <a href="#claude-rules">Instructions for Claude</a>
+      <a href="#fill-button">Fill button</a>
+      <a href="#backup">Backup</a>
+    </nav>
+
+    <main>
+      <div class="intro">
+        <h1>Your application profile</h1>
+        <p>Fill this in once. AutoInternship uses it to fill job applications, and Claude reads the same answers from your backup (profile.json). Nothing leaves this browser unless you download the backup.</p>
+      </div>
+
+      <section id="you">
+        <h2>You</h2>
+        <p class="lede">The basics every application asks for.</p>
+        <div class="grid">
+          <label class="field"><span>First name</span><input data-key="firstName" autocomplete="given-name"></label>
+          <label class="field"><span>Last name</span><input data-key="lastName" autocomplete="family-name"></label>
+          <label class="field"><span>Preferred name</span><input data-key="preferredName" placeholder="Leave empty if it’s your first name"></label>
+          <label class="field"><span>Email</span><input type="email" data-key="email" autocomplete="email"></label>
+          <label class="field"><span>Phone</span><input type="tel" data-key="phone" autocomplete="tel"></label>
+          <label class="field"><span>Street address</span><input data-key="street" autocomplete="address-line1"></label>
+          <label class="field"><span>City</span><input data-key="city" autocomplete="address-level2"></label>
+          <div class="pair">
+            <label class="field"><span>State or province</span><input data-key="state" autocomplete="address-level1" placeholder="CA"></label>
+            <label class="field"><span>Postal code</span><input data-key="postalCode" autocomplete="postal-code"></label>
+          </div>
+          <label class="field"><span>Country</span><input data-key="country" autocomplete="country-name" placeholder="United States"></label>
+        </div>
+      </section>
+
+      <section id="links">
+        <h2>Links</h2>
+        <p class="lede">Full URLs work best, but AutoInternship adds https:// if you leave it off.</p>
+        <div class="grid">
+          <label class="field"><span>LinkedIn</span><input data-key="linkedin" placeholder="linkedin.com/in/your-name"></label>
+          <label class="field"><span>GitHub</span><input data-key="github" placeholder="github.com/your-name"></label>
+          <label class="field"><span>Portfolio</span><input data-key="portfolio"></label>
+          <label class="field"><span>Other website</span><input data-key="website"></label>
+        </div>
+      </section>
+
+      <section id="education">
+        <h2>Education</h2>
+        <p class="lede">Your current school first, most recent first after that.</p>
+        <p class="list-empty" data-empty="education">No schools yet.</p>
+        <div data-list="education"></div>
+        <button type="button" class="btn" data-add="education">Add school</button>
+      </section>
+
+      <section id="student">
+        <h2>Student and internship</h2>
+        <p class="lede">The questions internship applications ask that regular job applications don’t. Your school, major and GPA come from your first entry under Education.</p>
+        <div class="grid">
+          <label class="field"><span>Expected graduation</span><input data-key="expectedGraduation" placeholder="May 2028"></label>
+          <label class="field"><span>Class standing</span><input data-key="classStanding" list="standingList" placeholder="Sophomore"></label>
+          <label class="field"><span>Currently enrolled in a degree program</span>
+            <select data-key="enrolled"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>Returning to school after the internship</span>
+            <select data-key="returningToSchool"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>Internship term</span><input data-key="internshipTerm" placeholder="Summer 2027"></label>
+          <div class="pair">
+            <label class="field"><span>Available from</span><input data-key="availableFrom" placeholder="June 1, 2027"></label>
+            <label class="field"><span>Available until</span><input data-key="availableUntil" placeholder="August 20, 2027"></label>
+          </div>
+          <label class="field wide"><span>Relevant coursework</span><textarea data-key="relevantCoursework" rows="2" placeholder="Data Structures, Algorithms, Databases, Probability and Statistics"></textarea></label>
+          <label class="field wide"><span>Work authorization details</span><input data-key="workAuthDetails" placeholder="Optional, for example: F-1 student, eligible for CPT"></label>
+        </div>
+        <p class="lede" style="margin-top:12px">Claude uses work authorization details only for written answers. Yes-or-no questions use your answers under Eligibility and preferences.</p>
+        <datalist id="standingList"><option value="Freshman"><option value="Sophomore"><option value="Junior"><option value="Senior"><option value="Graduate student"></datalist>
+      </section>
+
+      <section id="work">
+        <h2>Experience</h2>
+        <p class="lede">Internships, research, campus jobs and part-time work, most recent first. Forms that ask for your current employer and title get the first entry. Highlights give Claude real material for open-ended questions.</p>
+        <p class="list-empty" data-empty="work">No experience added yet. Part-time and campus jobs count.</p>
+        <div data-list="work"></div>
+        <button type="button" class="btn" data-add="work">Add experience</button>
+      </section>
+
+      <section id="projects">
+        <h2>Projects</h2>
+        <p class="lede">Class, personal, research and hackathon projects. For internships these often matter as much as jobs. For group projects, describe your own part.</p>
+        <p class="list-empty" data-empty="projects">No projects yet.</p>
+        <div data-list="projects"></div>
+        <button type="button" class="btn" data-add="projects">Add project</button>
+      </section>
+
+
+
+      <section id="resume">
+        <h2>Resume and skills</h2>
+        <p class="lede">AutoInternship attaches this file wherever a form asks for a resume or CV. If you write your resume in Overleaf, use Download PDF there and choose that file.</p>
+        <div class="file-row">
+          <div id="resumeInfo"><span class="file-meta">No resume attached yet.</span></div>
+          <button type="button" class="btn" id="resumePick">Choose file</button>
+          <input class="visually-hidden" type="file" id="resumeFile" tabindex="-1" aria-hidden="true" accept=".pdf,.doc,.docx,.rtf,.txt">
+          <button type="button" class="link-btn danger" id="resumeRemove" hidden>Remove</button>
+        </div>
+        <p class="inline-error" id="resumeError" role="alert" hidden></p>
+        <div class="grid">
+          <label class="field wide"><span>Summary</span><textarea data-key="summary" rows="4" placeholder="Two or three sentences about what you do and what you’re looking for."></textarea></label>
+          <label class="field wide"><span>Skills</span><textarea data-key="skills" rows="3" placeholder="TypeScript, React, Postgres, user research…"></textarea></label>
+          <label class="field"><span>Years of experience</span><input data-key="yearsExperience" inputmode="numeric" placeholder="6"></label>
+        </div>
+      </section>
+
+      <section id="eligibility">
+        <h2>Eligibility and preferences</h2>
+        <p class="lede">Used for yes-or-no questions. If a question names a different country than yours, AutoInternship leaves it for you. Sponsorship questions about now or the future use the first sponsorship answer, and questions only about the internship use the second. A question that could mean either is filled only when both answers are the same.</p>
+        <div class="grid">
+          <label class="field"><span>Legally authorized to work</span>
+            <select data-key="workAuthorized"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>In which country</span><input data-key="authCountry" placeholder="United States"></label>
+          <label class="field"><span>Need visa sponsorship, now or later</span>
+            <select data-key="needsSponsorship"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>Need sponsorship for the internship itself</span>
+            <select data-key="needsSponsorshipForInternship"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>Current or former government employee or official</span>
+            <select data-key="governmentEmployee"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>A close relative is a government official or employee</span>
+            <select data-key="governmentRelative"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>Willing to relocate</span>
+            <select data-key="willingToRelocate"><option value="">Not set</option><option value="yes">Yes</option><option value="no">No</option></select></label>
+          <label class="field"><span>Salary expectation</span><input data-key="salary" placeholder="$150,000 to $170,000"></label>
+          <label class="field"><span>Earliest start or notice period</span><input data-key="startDate" placeholder="Two weeks’ notice"></label>
+          <label class="field wide"><span>Work preference</span><input data-key="workPreference" placeholder="Remote or hybrid in the Bay Area"></label>
+        </div>
+      </section>
+
+      <section id="self-id">
+        <h2>Voluntary self-identification</h2>
+        <p class="lede">Many U.S. applications end with these optional questions. AutoInternship answers one only with the choice you make here, and only when the form offers a matching option. Leave a question on “Not set” and AutoInternship leaves it for you. Some forms (Workday, for example) ask Hispanic or Latino and race in one list, so set both. Questions about pronouns, sexual orientation or transgender identity are always left for you.</p>
+        <div class="grid">
+          <!-- The choices come from SELF_ID_LABELS in shared.js (options.js adds them). -->
+          <label class="field"><span>Gender</span><select data-key="gender" data-choices="gender"><option value="">Not set</option></select></label>
+          <label class="field"><span>Hispanic or Latino</span><select data-key="hispanicLatino" data-choices="hispanicLatino"><option value="">Not set</option></select></label>
+          <label class="field"><span>Race</span><select data-key="race" data-choices="race"><option value="">Not set</option></select></label>
+          <label class="field"><span>Veteran status</span><select data-key="veteranStatus" data-choices="veteranStatus"><option value="">Not set</option></select></label>
+          <label class="field"><span>Disability</span><select data-key="disabilityStatus" data-choices="disabilityStatus"><option value="">Not set</option></select></label>
+          <label class="field"><span>Identify as LGBTQ+</span><select data-key="lgbtq" data-choices="lgbtq"><option value="">Not set</option></select></label>
+        </div>
+      </section>
+
+      <section id="answers">
+        <h2>Saved answers</h2>
+        <p class="lede">When a question contains your phrase, AutoInternship fills in your answer. These take priority over everything else, and Claude sees them too.</p>
+        <p class="list-empty" data-empty="savedAnswers">No saved answers yet. A good first one: “how did you hear” → “LinkedIn”.</p>
+        <div data-list="savedAnswers"></div>
+        <button type="button" class="btn" data-add="savedAnswers">Add saved answer</button>
+      </section>
+
+      <section id="claude-rules">
+        <h2>Instructions for Claude</h2>
+        <p class="lede">The internship-application skill reads these from your backup (profile.json) when it writes answers for you.</p>
+        <div class="grid">
+          <label class="field wide"><span>How you write</span><textarea data-key="writingStyle" rows="3" placeholder="Plain and direct. Short sentences. No buzzwords. Mention specific results with numbers."></textarea></label>
+          <label class="field wide"><span>Extra rules, one per line</span><textarea data-key="extraRules" rows="3" placeholder="Never say I’m open to relocation for roles outside California."></textarea></label>
+        </div>
+      </section>
+
+      <section id="fill-button">
+        <h2>Fill button</h2>
+        <p class="lede">Application pages get a small “Fill with AutoInternship” button on the right edge. You or Claude click it, and a panel lists what was filled and what’s left, so Claude only works on the rest. It never attaches your stored resume, because Claude attaches one tailored to each job (the popup and shortcut still do).</p>
+        <div class="action">
+          <label class="switch"><input type="checkbox" id="fillButton"> Show the Fill button on application pages</label>
+          <p>Only a real click starts a fill, so a web page can’t start one by itself.</p>
+        </div>
+      </section>
+
+      <section id="backup">
+        <h2>Backup</h2>
+        <p class="lede">The backup downloads as profile.json, the file the internship-application skill reads. Move it into your job-search folder (if your browser named it “profile (1).json”, rename it). Your resume file isn’t included.</p>
+        <div class="action">
+          <button type="button" class="btn" id="exportJson">Download backup</button>
+          <p>Saves everything on this page.</p>
+        </div>
+        <div class="action">
+          <button type="button" class="btn" id="importPick">Restore from backup</button>
+          <input class="visually-hidden" type="file" id="importJson" tabindex="-1" aria-hidden="true" accept=".json,application/json">
+          <p id="importNote">Replaces your current profile with the one in the file.</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="workTpl">
+    <div class="entry">
+      <div class="grid">
+        <label class="field"><span>Job title</span><input data-field="title"></label>
+        <label class="field"><span>Company</span><input data-field="company"></label>
+        <label class="field"><span>Location</span><input data-field="location"></label>
+        <div class="pair">
+          <label class="field"><span>Start</span><input data-field="start" placeholder="Mar 2021"></label>
+          <label class="field"><span>End</span><input data-field="end" placeholder="Present"></label>
+        </div>
+        <label class="field wide"><span>Highlights, one per line</span><textarea data-field="highlights" rows="3" placeholder="Cut checkout load time 40% by rebuilding the cart service"></textarea></label>
+      </div>
+      <div class="entry-actions">
+        <button type="button" class="link-btn" data-action="up">Move up</button>
+        <button type="button" class="link-btn danger" data-action="remove">Remove job</button>
+      </div>
+    </div>
+  </template>
+
+  <template id="projectsTpl">
+    <div class="entry">
+      <div class="grid">
+        <label class="field"><span>Project name</span><input data-field="name"></label>
+        <label class="field"><span>Tools and languages</span><input data-field="tools" placeholder="Python, React, Firebase"></label>
+        <label class="field wide"><span>Link</span><input data-field="link" placeholder="github.com/you/project (optional)"></label>
+        <label class="field wide"><span>Highlights, one per line</span><textarea data-field="highlights" rows="3" placeholder="Built the ordering flow for a campus food app used by 300 students"></textarea></label>
+      </div>
+      <div class="entry-actions">
+        <button type="button" class="link-btn" data-action="up">Move up</button>
+        <button type="button" class="link-btn danger" data-action="remove">Remove project</button>
+      </div>
+    </div>
+  </template>
+
+  <template id="educationTpl">
+    <div class="entry">
+      <div class="grid">
+        <label class="field"><span>School</span><input data-field="school"></label>
+        <label class="field"><span>Degree</span><input data-field="degree" placeholder="Bachelor of Science"></label>
+        <label class="field"><span>Major or field of study</span><input data-field="field" placeholder="Computer Science"></label>
+        <label class="field"><span>Minor</span><input data-field="minor" placeholder="Optional"></label>
+        <div class="pair">
+          <label class="field"><span>Start</span><input data-field="start" placeholder="Sep 2024"></label>
+          <label class="field"><span>End</span><input data-field="end" placeholder="May 2028"></label>
+        </div>
+        <label class="field"><span>GPA</span><input data-field="gpa" placeholder="Optional"></label>
+      </div>
+      <div class="entry-actions">
+        <button type="button" class="link-btn" data-action="up">Move up</button>
+        <button type="button" class="link-btn danger" data-action="remove">Remove school</button>
+      </div>
+    </div>
+  </template>
+
+  <template id="savedAnswersTpl">
+    <div class="entry">
+      <div class="grid">
+        <label class="field"><span>When a question contains</span><input data-field="match" placeholder="how did you hear"></label>
+        <label class="field"><span>Answer with</span><input data-field="answer" placeholder="LinkedIn"></label>
+      </div>
+      <div class="entry-actions">
+        <button type="button" class="link-btn danger" data-action="remove">Remove answer</button>
+      </div>
+    </div>
+  </template>
+
+  <script src="shared.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

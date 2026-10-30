@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AutoInternship</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="popup">
+  <header class="pop-head">
+    <img src="icons/icon32.png" width="20" height="20" alt="">
+    <span class="brand-name">AutoInternship</span>
+    <button type="button" class="link-btn" id="editProfile">Edit profile</button>
+  </header>
+
+  <div class="pop-body">
+    <section id="emptyState" hidden>
+      <h1>Set up your profile</h1>
+      <p class="note">Add your details once. Then fill any job application in one click and let Claude handle the rest.</p>
+      <button type="button" class="btn primary big" id="setup" style="margin-top:14px">Set up profile</button>
+    </section>
+
+    <section id="ready" hidden>
+      <p class="who" id="who"></p>
+      <button type="button" class="btn primary big" id="fill">Fill this page</button>
+
+      <div class="legend" id="legend" aria-live="polite">
+        <p class="legend-row"><span class="swatch solid" aria-hidden="true"></span><span id="filledText">Filled from your profile</span></p>
+        <p class="legend-row"><span class="swatch dashed" aria-hidden="true"></span><span id="leftText">Still empty, for you or Claude</span></p>
+      </div>
+      <p class="note" id="note" hidden></p>
+      <p class="error" id="error" role="alert" hidden></p>
+    </section>
+  </div>
+
+  <footer class="pop-foot" id="shortcut"></footer>
+
+  <script src="shared.js"></script>
+  <script src="runner.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

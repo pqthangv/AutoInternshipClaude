@@ -10,11 +10,18 @@ desktop.ini
 # Zips made for uploading the skills
 *.zip
 
+# Local notes for Claude Code
+CLAUDE.md
+
 # Personal job-search files, in case you run a search from this folder
 /resume/
 /Applications/
-/profile.json
 /transcript.pdf
 /jobs.txt
 /tracker.xlsx
 _old/
+
+# Extension profile backups hold your personal details, wherever they land
+# (profile.json from AutoInternship 1.1; applyfile-profile.json from when it was called Applyfile)
+profile.json
+applyfile-profile.json
