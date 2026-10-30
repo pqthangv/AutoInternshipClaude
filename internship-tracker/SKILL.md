@@ -44,7 +44,7 @@ Run `summary`, then answer in chat with a short table (company, role, status, ne
 
 ### "I submitted ..."
 
-Find the row and set the status to `Submitted`. If they say "I submitted all of them," list the `Ready to submit` rows and confirm once before updating them all.
+Find the row and set the status to `Submitted`. If they say "I submitted all of them," list the `Ready to submit` rows and confirm once before updating them all. Applications Claude submitted itself (when the user asked it to) are already `Submitted`, and their record's status line says "Submitted by Claude" with the confirmation.
 
 Ask once whether they changed anything on the form before submitting. If they did, add a `## Changes before submitting` section to that application-record.md, so the record matches what the company actually has. Update the record's status line too.
 

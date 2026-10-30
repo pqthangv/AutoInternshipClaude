@@ -992,7 +992,10 @@
   // again on each step; it never clicks Continue or Submit itself.
   async function fill(opts = {}) {
     let data = {};
-    try { data = await chrome.storage.local.get(['profile', 'resume']); } catch (_) { /* fall through with empty profile */ }
+    // The Fill button never attaches the stored resume, so don't load it: it's a base64 PDF that can run to
+    // megabytes, read out of storage on every page and Workday step.
+    const keys = opts.skipResume ? ['profile'] : ['profile', 'resume'];
+    try { data = await chrome.storage.local.get(keys); } catch (_) { /* fall through with empty profile */ }
     const p = data.profile || {};
     const resume = opts.skipResume ? null : data.resume || null;
 

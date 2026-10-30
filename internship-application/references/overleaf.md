@@ -35,22 +35,16 @@ An unescaped `%` is the dangerous one: it comments out the rest of the line, so 
 
 ## Build and check
 
-```
-python scripts/build_resume.py "<scratch>/<main>.tex" --out "<scratch>/Firstname_Lastname_Resume_Company.pdf" --max-pages 1 --expect "<Full Name>" --expect "Education"
-```
+`check_tailored.py` (SKILL.md step 3) builds the copy first, with `build_resume.py`. Add `--expect` with one or two phrases you just added, so you know they made it into the PDF's text. What its exit codes mean for a LaTeX copy:
 
-Add one or two `--expect` phrases you just added, so you know they made it into the PDF's text. The script prints JSON and exits with:
-
-- **0, built.** Check `warnings`. Lines running past the margin mean a new line is too long; shorten it. If `missing_text` lists your expected phrases, the PDF's text layer is broken and tracking systems won't read it: for pdflatex, make sure the preamble has `\input{glyphtounicode}` and `\pdfgentounicode=1`, adding them to the copy if not.
-- **1, compile error.** Read `errors`, `suspect_lines` and `hints`. It's almost always a special character or a brace in text you added. Fix and build again. After three failed tries, undo your last round of edits and build that instead, then tell the user what you couldn't change.
-- **2, too long.** `lines_over` says roughly how many lines spill past page one. Cut low-value content first, following "Trimming to one page" in tailoring.md. If only a few lines remain over and the next item is a strong match for the posting, squeeze instead, within the limits in tailoring.md. Then build again. If the result warns that margins are too tight or text is below 9pt, undo the last squeeze.
-- **Space at the bottom** (exit 0, `free_lines` of 2 or more, and a warning): add about that many lines from the master, following "Filling the page" in tailoring.md, and build again. Leave the space only when nothing else in the master fits the posting, and say so in changes.md.
-- **3, no LaTeX here.** Fact-check the tailored .tex against the master with `check_resume.py`, save it to the job folder as `resume-src/`, and tell the user to compile it in Overleaf: zip the resume-src folder and use New Project → Upload Project, or paste the changed lines into a copy of their project. Keep filling the rest of the application, leave the resume upload for the user, and log the row with status `Needs you` and next step "compile resume in Overleaf, then attach".
+- **0 or 2, built.** Lines running past the margin mean a new line is too long; shorten it. If `fix` says expected text isn't readable, the PDF's text layer is broken and tracking systems won't read it: for pdflatex, make sure the preamble has `\input{glyphtounicode}` and `\pdfgentounicode=1`, adding them to the copy if not. If it warns that margins are too tight or text is below 9pt, undo the last squeeze.
+- **2 with `lines_over`, too long.** Roughly how many lines spill past page one. Cut low-value content first, following "Trimming to one page" in tailoring.md. If only a few lines remain over and the next item is a strong match for the posting, squeeze instead, within the limits in tailoring.md. Then run it again.
+- **Space at the bottom** (empty lines under `review`): add about that many lines from the master, following "Filling the page" in tailoring.md, and run it again. Leave the space only when nothing else in the master fits the posting, and say so in changes.md.
+- **1, compile error.** Read `errors`, `suspect_lines` and `hints`. It's almost always a special character or a brace in text you added. Fix and run it again. After three failed tries, undo your last round of edits and build that instead, then tell the user what you couldn't change.
+- **3, no LaTeX here.** The bullet comparison and fact-check still ran on the .tex: handle what they flag, save the copy to the job folder as `resume-src/`, and tell the user to compile it in Overleaf: zip the resume-src folder and use New Project → Upload Project, or paste the changed lines into a copy of their project. Keep filling the rest of the application, leave the resume upload for the user, and log the row with status `Needs you` and next step "compile resume in Overleaf, then attach".
 
 If the error is a missing package or font that's not in the project folder (for example fontawesome5 icons), treat it like exit 3: the user's Overleaf has it even when this machine doesn't.
 
-After a successful build, run `ats_check.py` as described in SKILL.md step 3.
-
 ## Keeping a copy in Overleaf
 
-The user doesn't need to, since the PDF and its source are in the job folder. If a build you already saved turns out wrong, rebuild in scratch and save again: build_resume.py moves the older PDF into `_old/` instead of overwriting or deleting it. If they want the tailored version in Overleaf too, zip resume-src and upload it with New Project → Upload Project.
+The user doesn't need to, since the PDF and its source are in the job folder. If a build you already saved turns out wrong, rebuild in scratch and save again, moving the saved PDF and resume-src/ into `_old/` first (SKILL.md step 3), never overwriting or deleting them. If they want the tailored version in Overleaf too, zip resume-src and upload it with New Project → Upload Project.
