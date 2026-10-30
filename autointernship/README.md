@@ -33,10 +33,10 @@ The `internship-application` skill in this repo reads your answers from `profile
 Name, contact details, address, links, education, student questions (graduation, class standing, term, dates), work history, work authorization, sponsorship, relocation, government ties, salary, start date, your saved answers and your resume. That includes text boxes, dropdowns (including Greenhouse and Workday's custom ones), radio buttons and "select all that apply" checkboxes.
 
 - **Sponsorship** has two answers: "now or in the future" and "for the internship itself". If a question could mean either, it's filled only when both answers match.
-- **Voluntary self-identification** (gender, Hispanic or Latino, race, veteran, disability, LGBTQ+) is filled only with the choice you pick for each, including "Decline to answer". "Not set" leaves it for you.
+- **Voluntary self-identification** (gender, pronouns, Hispanic or Latino, race, veteran, disability, LGBTQ+, transgender, sexual orientation) is filled only with the choice you pick for each, including "Decline to answer". "Not set" leaves it for you.
 - **Saved answers** teach it new questions: if a question contains your phrase, it uses your answer.
 
-It always leaves these for you or Claude: open-ended questions, cover letters, consent and "I certify" checkboxes, pronouns, sexual orientation and transgender identity questions, ID numbers, date of birth, bank details, and anything it can't match confidently.
+It always leaves these for you or Claude: open-ended questions, cover letters, consent and "I certify" checkboxes, religion and marital status questions, ID numbers, date of birth, bank details, and anything it can't match confidently.
 
 ## Privacy
 

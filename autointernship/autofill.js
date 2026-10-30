@@ -23,10 +23,10 @@
   const SENSITIVE = /\b(ssn|social security|social insurance|national insurance|tax id|passport|driver'?s? licen[cs]e|date of birth|birth ?date|dob|bank|routing|account number|credit card|card number|cvv|password)\b/;
   const DEMOGRAPHIC = /\b(gender|sex|pronouns?|race|racial|ethnicity|ethnic|hispanic|latin[oax]|veteran|disability|disabled|sexual orientation|transgender|lgbt\w*|religion|religious|marital)\b/;
   // Demographic questions are never filled from RULES or saved answers. The voluntary self-identification
-  // questions (gender, Hispanic or Latino, race, veteran status, disability, and "Do you identify as LGBTQ+?")
-  // are filled only from the answers you chose on the profile page; see "Voluntary self-identification" below.
-  // These other ones are always left for you.
-  const NOT_STANDARD_SELF_ID = /\b(pronouns?|orientation|transgender|religion|religious|marital)\b/;
+  // questions (gender, pronouns, Hispanic or Latino, race, veteran status, disability, LGBTQ+, transgender
+  // identity, sexual orientation) are filled only from the answers you chose on the profile page; see
+  // "Voluntary self-identification" below. These other ones are always left for you.
+  const NOT_SELF_ID = /\b(religion|religious|marital)\b/;
   // "Decline to self-identify", "I don't wish to answer", "Prefer not to say", Workday's "Not Declared"...
   const DECLINE = /\b(decline|prefer not|rather not|choose not|(do not|don't) (wish|want) to|not (wish|want) to|no answer|not disclosed?|undisclosed|not declared|undeclared)\b/;
   // A lone checkbox like "I agree to the privacy policy" or "I certify this is accurate" is an agreement
@@ -407,12 +407,30 @@
     nonbinary: has(/\bnon ?-?binary\b|\bgenderqueer\b|\bgender ?(fluid|non-?conforming)\b/, DECLINE),
   };
   const DECLINED = [has(DECLINE)];
+  // "She/Her", "she/her/hers", "He / Him"... Only an option with just your pronouns counts, so a she/her
+  // answer never picks a mixed option like "She/They".
+  const PRONOUNS = { she: /\bshe\b|\bhers?\b/, he: /\bhe\b|\bhim\b|\bhis\b/, they: /\bthey\b|\bthem\b|\btheirs?\b/ };
+  // What to type when the question is a plain text box (the one self-ID answer that's ever typed).
+  const PRONOUN_TEXT = { she: 'she/her', he: 'he/him', they: 'they/them' };
+  // A combined option like "Gay or lesbian" counts for both, since that's the group the form means.
+  const ORIENTATIONS = {
+    straight: /\bstraight\b|\bheterosexual\b/,
+    gay: /\bgay\b|\bhomosexual\b/,
+    lesbian: /\blesbian\b|\bhomosexual\b/,
+    bisexual: /\bbi-?sexual\b/,
+    pansexual: /\bpan-?sexual\b/,
+    asexual: /\ba-?sexual\b|\bace\b/,
+    queer: /\bqueer\b/,
+  };
 
   // Which self-identification question a label asks, or null for anything else.
   function selfIdTopic(q) {
     // Checked first because the question often spells LGBTQ+ out ("lesbian, gay, bisexual, transgender...").
     if (/\blgbt\w*|\bqueer\b/.test(q)) return 'lgbtq';
-    if (NOT_STANDARD_SELF_ID.test(q)) return null;
+    if (/\bpronouns?\b/.test(q)) return 'pronouns';
+    if (/\btransgender\b|\btrans\b/.test(q)) return 'transgender';
+    if (/\bsexual orientation\b|\borientation\b|\bsexuality\b/.test(q)) return 'orientation';
+    if (NOT_SELF_ID.test(q)) return null;
     if (/\b(race|racial|ethnicity|ethnic)\b/.test(q)) return 'race';
     if (/\bhispanic\b|\blatin[oax]\b/.test(q)) return 'hispanic';
     if (/\bveteran\b/.test(q)) return 'veteran';
@@ -456,6 +474,21 @@
         if (p.disabilityStatus === 'yes') return [has(/^yes\b/, DECLINE), has(/\b(i have|have had) a disability\b/, /\bnot\b|\bdon't\b/)];
         if (p.disabilityStatus === 'no') return [has(/^no\b/, DECLINE), has(/\b(do not|don't) have a disability\b/)];
         return [];
+      case 'pronouns': {
+        if (p.pronouns === 'decline') return DECLINED;
+        const mine = PRONOUNS[p.pronouns];
+        if (!mine) return [];
+        const others = Object.entries(PRONOUNS).filter(([k]) => k !== p.pronouns).map(([, re]) => re);
+        return [has(mine, DECLINE, ...others)];
+      }
+      case 'transgender':
+        if (p.transgender === 'decline') return DECLINED;
+        if (p.transgender === 'yes') return [has(/^yes\b/, DECLINE)];
+        if (p.transgender === 'no') return [has(/^no\b/, DECLINE)];
+        return [];
+      case 'orientation':
+        if (p.sexualOrientation === 'decline') return DECLINED;
+        return ORIENTATIONS[p.sexualOrientation] ? [has(ORIENTATIONS[p.sexualOrientation], DECLINE)] : [];
       case 'lgbtq':
         if (p.lgbtq === 'decline') return DECLINED;
         if (p.lgbtq === 'yes') return [has(/^yes\b/, DECLINE)];
@@ -469,13 +502,15 @@
   // An answer object like resolve()'s, but it picks options itself:
   //   pick(options)    → the one best option (dropdowns, radio buttons)
   //   pickAll(options) → every option that applies ("check all that apply" lists, e.g. Hispanic and a race)
-  // Text boxes are never filled with these answers.
+  //   text             → what to type in a plain text box: only pronouns have one; other answers are never typed
   function selfId(p, label) {
-    const wants = selfIdWants(selfIdTopic(label), p);
+    const topic = selfIdTopic(label);
+    const wants = selfIdWants(topic, p);
     if (!wants.length) return null;
     const usable = (options) => options.filter((o) => !isPlaceholderOpt(o.text, o.val));
     return {
       selfId: true,
+      text: topic === 'pronouns' ? PRONOUN_TEXT[p.pronouns] || null : null,
       pick: (options) => {
         const opts = usable(options);
         for (const w of wants) { const o = opts.find((x) => w(norm(x.text))); if (o) return o; }
@@ -527,7 +562,12 @@
   }
 
   function apply(el, kind, res) {
-    if (res.pick && kind !== 'select') return false; // self-identification answers only go into choices, never typed
+    if (res.pick && kind !== 'select') {
+      // Self-identification answers only go into choices, never typed, except pronouns in a one-line text box.
+      if (!res.text || kind !== 'text' || (el.maxLength > 0 && res.text.length > el.maxLength)) return false;
+      setValue(el, res.text);
+      return true;
+    }
     if (kind === 'select') {
       const pick = pickOption([...el.options].map((o) => ({ text: o.text, val: o.value })), res);
       if (!pick) return false;

@@ -15,7 +15,8 @@ const AutoInternship = (() => {
       governmentEmployee: '', governmentRelative: '',
       salary: '', startDate: '', workPreference: '',
       // Voluntary self-identification. Empty means "leave it for me"; see SELF_ID_LABELS for the choices.
-      gender: '', hispanicLatino: '', race: '', veteranStatus: '', disabilityStatus: '', lgbtq: '',
+      gender: '', pronouns: '', hispanicLatino: '', race: '', veteranStatus: '', disabilityStatus: '', lgbtq: '',
+      transgender: '', sexualOrientation: '',
       savedAnswers: [],
       // For Claude's written answers; the internship-application skill reads these from profile.json.
       writingStyle: '', extraRules: '',
@@ -26,6 +27,7 @@ const AutoInternship = (() => {
   // words. autofill.js matches each code to the many ways forms word it.
   const SELF_ID_LABELS = {
     gender: { female: 'Female', male: 'Male', nonbinary: 'Non-binary', decline: 'Decline to answer' },
+    pronouns: { she: 'She/her', he: 'He/him', they: 'They/them', decline: 'Decline to answer' },
     hispanicLatino: { yes: 'Yes', no: 'No', decline: 'Decline to answer' },
     race: {
       'american-indian': 'American Indian or Alaska Native', asian: 'Asian', black: 'Black or African American',
@@ -35,6 +37,11 @@ const AutoInternship = (() => {
     veteranStatus: { no: 'Not a veteran', protected: 'Protected veteran', decline: 'Decline to answer' },
     disabilityStatus: { yes: 'Yes, I have (or have had) a disability', no: 'No disability', decline: 'Decline to answer' },
     lgbtq: { yes: 'Yes', no: 'No', decline: 'Decline to answer' },
+    transgender: { yes: 'Yes', no: 'No', decline: 'Decline to answer' },
+    sexualOrientation: {
+      straight: 'Straight / heterosexual', gay: 'Gay', lesbian: 'Lesbian', bisexual: 'Bisexual', pansexual: 'Pansexual',
+      asexual: 'Asexual', queer: 'Queer', decline: 'Decline to answer',
+    },
   };
 
   const blank = {

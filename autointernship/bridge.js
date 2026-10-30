@@ -47,10 +47,16 @@
 
     root.append(button, panel);
     attach();
+    keeper.observe(document, { childList: true, subtree: true });
   }
 
   // Inside <body>, so the report is part of the page text Claude reads (text outside <body> is often skipped).
   const attach = () => (document.body || document.documentElement).appendChild(root);
+
+  // Some sites replace the whole page when their scripts finish loading (Greenhouse's job boards do,
+  // a few seconds in on a slow connection), which takes the button with it. Watch for that and put it
+  // straight back, so it doesn't vanish for a moment or for good.
+  const keeper = new MutationObserver(() => { if (root && !root.isConnected) attach(); });
 
   async function run(button) {
     button.disabled = true;
@@ -67,16 +73,24 @@
   }
 
   // The report as plain text, so it reads the same on screen, in a screenshot and in the page text.
+  // Kept short on purpose, because Claude reads all of it on every page: what's left (the part to act on)
+  // comes first, one line each; what was filled follows as one compact line, since it's only needed for
+  // the application record. Long labels, values and choice lists are cut with "…" (full values are in
+  // the profile).
+  const KIND = { textarea: 'text box', 'custom dropdown': 'dropdown', radio: 'choice' };
+  const cut = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s; };
+  const choices = (opts) => opts.slice(0, 8).map((o) => cut(o, 30)).join(' | ') + (opts.length > 8 ? ` | +${opts.length - 8} more` : '');
+  const pair = (f) => `${cut(f.label, 60)} = ${cut(f.value, 60)}`;
+
   function reportText(r) {
     if (!r.ok) return `AutoInternship couldn't fill this page: ${r.error}`;
     const lines = [`AutoInternship report: filled ${r.filled}, left ${r.left}.`];
-    const list = (title, items, fmt) => { if (items.length) lines.push('', title, ...items.map((x) => `- ${fmt(x)}`)); };
-    list('Filled:', r.fields, (f) => `${f.label}: ${f.value}`);
-    list('Already filled (not changed):', r.prefilled, (f) => `${f.label}: ${f.value}`);
-    list('Left for you or Claude:', r.todo, (t) => {
-      const about = [t.kind, t.required ? 'required' : ''].filter(Boolean).join(', ');
-      return `${t.label} (${about})${t.options ? `. Choices: ${t.options.join(' | ')}` : ''}`;
-    });
+    if (r.todo.length) {
+      lines.push('', 'Left for you or Claude (* = required):', ...r.todo.map((t) =>
+        `- ${cut(t.label, 90)}${t.required ? '*' : ''} (${KIND[t.kind] || t.kind}${t.options ? `: ${choices(t.options)}` : ''})`));
+    }
+    if (r.fields.length) lines.push('', `Filled: ${r.fields.map(pair).join(' · ')}`);
+    if (r.prefilled.length) lines.push('', `Already filled: ${r.prefilled.map(pair).join(' · ')}`);
     return lines.join('\n');
   }
 
@@ -94,11 +108,11 @@
   }
 
   // While the switch is on, checks every 1.5 seconds: shows the button once the frame has a form (forms
-  // often load after the page), and puts it back if the site redraws the page and drops it (single-page
-  // sites like Workday can, between steps). Turning the switch off removes it.
+  // often load after the page), and as a backup to the keeper above, puts it back if a redraw dropped it.
+  // Turning the switch off removes it.
   function update(on) {
     clearInterval(timer);
-    if (!on) { if (root) root.remove(); root = null; return; }
+    if (!on) { keeper.disconnect(); if (root) root.remove(); root = null; return; }
     const check = () => {
       if (!root) { if (hasForm()) build(); } else if (!root.isConnected) attach();
     };

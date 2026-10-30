@@ -19,7 +19,7 @@ Only when the folder has no profile.json:
 - Sponsorship, two separate questions: will they need it now or in the future (`needsSponsorship`), and do they need it for the internship itself (`needsSponsorshipForInternship`). Many students on F-1 need none for an internship (CPT) but will later. Never work these out yourself.
 - Class standing, internship term, available dates, enrolled now, returning to school after the internship, willing to relocate, work preference.
 - Government ties: are they a current or former government employee or official (`governmentEmployee`), and is a close relative one (`governmentRelative`)? Finance, consulting and defense forms ask this.
-- Optional, voluntary self-identification: gender, Hispanic or Latino, race, veteran status, disability, LGBTQ+. Each can be an answer, "decline" (forms then get "Decline to answer"), or left empty (the user answers on each form). Never infer any of these from a name, photo or anything else.
+- Optional, voluntary self-identification: gender, pronouns, Hispanic or Latino, race, veteran status, disability, LGBTQ+, transgender, sexual orientation. Each can be an answer, "decline" (forms then get "Decline to answer"), or left empty (the user answers on each form). Never infer any of these from a name, photo or anything else.
 - Optional: how they write (`writingStyle`) and any rules for written answers (`extraRules`).
 
 ## Values
@@ -27,11 +27,14 @@ Only when the folder has no profile.json:
 - Yes-or-no fields take `"yes"`, `"no"` or `""` (not set): `enrolled`, `returningToSchool`, `workAuthorized`, `needsSponsorship`, `needsSponsorshipForInternship`, `willingToRelocate`, `governmentEmployee`, `governmentRelative`.
 - Self-identification takes these codes, or `""` to leave it for the user:
   - `gender`: `female`, `male`, `nonbinary`, `decline`
+  - `pronouns`: `she` (she/her), `he` (he/him), `they` (they/them), `decline`. For other pronouns, leave it empty and the user answers on each form.
   - `hispanicLatino`: `yes`, `no`, `decline`
   - `race`: `american-indian`, `asian`, `black`, `pacific-islander`, `white`, `two-or-more`, `decline`
   - `veteranStatus`: `no` (not a veteran), `protected`, `decline`
   - `disabilityStatus`: `yes`, `no`, `decline`
   - `lgbtq`: `yes`, `no`, `decline`
+  - `transgender`: `yes`, `no`, `decline`
+  - `sexualOrientation`: `straight`, `gay`, `lesbian`, `bisexual`, `pansexual`, `asexual`, `queer`, `decline`
 - Text as the user would write it: `classStanding` ("Sophomore"), `expectedGraduation` ("May 2028"), `internshipTerm` ("Summer 2027"), `availableFrom` and `availableUntil` ("June 1, 2027"), `workAuthDetails` (used only in written answers, for example "F-1 student, eligible for CPT"), `salary`, `startDate`, `workPreference`, `summary`, `skills`, `yearsExperience`, `writingStyle`, and `extraRules` (one rule per line).
 - List entries:
   - `education`: `{ "school", "degree", "field", "minor", "start", "end", "gpa" }`. Write the GPA exactly as written.
