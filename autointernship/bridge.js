@@ -76,7 +76,8 @@
   // Kept short on purpose, because Claude reads all of it on every page: what's left (the part to act on)
   // comes first, one line each; what was filled follows as one compact line, since it's only needed for
   // the application record. Long labels, values and choice lists are cut with "…" (full values are in
-  // the profile).
+  // the profile). Name boxes the site filled differently from the profile get their own "Check" lines
+  // up top, because a wrong name is easy to miss in the compact line; on most pages there are none.
   const KIND = { textarea: 'text box', 'custom dropdown': 'dropdown', radio: 'choice' };
   const cut = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s; };
   const choices = (opts) => opts.slice(0, 8).map((o) => cut(o, 30)).join(' | ') + (opts.length > 8 ? ` | +${opts.length - 8} more` : '');
@@ -85,12 +86,17 @@
   function reportText(r) {
     if (!r.ok) return `AutoInternship couldn't fill this page: ${r.error}`;
     const lines = [`AutoInternship report: filled ${r.filled}, left ${r.left}.`];
+    const differ = r.prefilled.filter((f) => f.profile);
+    const same = r.prefilled.filter((f) => !f.profile);
+    if (differ.length) {
+      lines.push('', 'Check: the site filled these differently from the profile:', ...differ.map((f) => `- ${pair(f)} (profile: ${cut(f.profile, 60)})`));
+    }
     if (r.todo.length) {
       lines.push('', 'Left for you or Claude (* = required):', ...r.todo.map((t) =>
         `- ${cut(t.label, 90)}${t.required ? '*' : ''} (${KIND[t.kind] || t.kind}${t.options ? `: ${choices(t.options)}` : ''})`));
     }
     if (r.fields.length) lines.push('', `Filled: ${r.fields.map(pair).join(' · ')}`);
-    if (r.prefilled.length) lines.push('', `Already filled: ${r.prefilled.map(pair).join(' · ')}`);
+    if (same.length) lines.push('', `Already filled: ${same.map(pair).join(' · ')}`);
     return lines.join('\n');
   }
 
