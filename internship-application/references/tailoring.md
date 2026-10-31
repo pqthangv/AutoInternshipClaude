@@ -58,7 +58,7 @@ When picking what to keep for a long master, leave awards out of the first selec
 
 The master can be any length, and may grow to several pages as the user adds to it.
 
-**When the master is more than about two pages, select instead of cutting.** Start the tailored copy from what to keep, not from everything: the header, the education entry and coursework line, the two to four projects and the experience entries that best match the posting (with their most relevant bullets), one or two activities if they fit, and the skills section. Build it, then adjust: if the build reports 2 or more `free_lines`, add back as in "Filling the page" below; if it's over, trim as below. Choosing first is much faster than deleting most of a long document, and it keeps the focus on the posting.
+**When the master is more than about two pages, select instead of cutting.** Start the tailored copy from what to keep, not from everything: the header, the education entry and coursework line, the two to four projects and the experience entries that best match the posting (with their most relevant bullets), any research role (see "Experience"), one or two activities if they fit, and the skills section. Build it, then adjust: if the build reports 2 or more `free_lines`, add back as in "Filling the page" below; if it's over, trim as below. Choosing first is much faster than deleting most of a long document, and it keeps the focus on the posting.
 
 The check will list more keywords that are in the master but not on this page as the master grows. That's expected: bring back the ones that matter most for this posting while staying on one page, and leave the rest.
 
@@ -67,7 +67,7 @@ The check will list more keywords that are in the master but not on this page as
 1. Awards, honors, scholarships and Dean's List lines (keep at most one, last, and only if everything relevant already fits).
 2. Projects, bullets and activities that show nothing the posting asks for.
 3. Third and later bullets on less relevant entries.
-4. Older or unrelated part-time jobs down to one bullet (keep the entry; it shows reliability).
+4. Older or unrelated part-time jobs and research roles down to one bullet (keep the entry: a job shows reliability, a research title sustained work).
 5. Activities beyond the one or two most relevant.
 6. The coursework line down to the four most relevant courses.
 7. Long bullets shortened to one line, keeping every fact and number.
@@ -117,6 +117,7 @@ Projects are often the strongest evidence a student has.
 ## Experience
 
 - Internships, research and technical jobs: order bullets by relevance to the posting, and rewrite them to lead with its vocabulary wherever that's true to what the user did (see "Rewrite every kept bullet").
+- Research roles (student researcher, research assistant, lab member): keep the entry on every version, even when its work also appears as separate projects. A research title with dates shows sustained work in a lab or program, which projects alone don't. Early tailored versions dropped one in 28 of 30 resumes because its bullets repeated work also kept as projects, and the changes.md files never said so. When its work also appears as separate projects, give it one or two bullets on what they don't already say: the program or lab, how long, and its outputs (papers, reports, presentations, awards). Leave the technical detail to the project entries, so no fact appears twice.
 - Part-time and campus jobs (retail, food service, tutoring, campus IT): keep one or two bullets showing transferable skills the posting asks for, such as communication, working under time pressure, training others or handling money. Don't drop these entirely for a student with little other experience; they show reliability.
 
 ## Skills
@@ -185,6 +186,7 @@ If the master itself uses a two-column or icon-heavy template, keep its look in 
 ## What changed
 - Coursework: led with <courses> (posting asks for <requirement>).
 - Projects: moved <project> to the top; dropped <project> for space.
+- Experience: kept <entries>; cut <entry> to <N> bullets (or dropped it), because <reason>.
 - Skills: put <tools> first.
 - Page: filled to the bottom. (Or: <N> lines free, because <nothing else in the master fits this posting>.)
 
