@@ -87,12 +87,21 @@
     return parts.every((a) => a === 'no') ? 'no' : null;
   }
 
+  // One box for your whole name: "First and Last Name", "First & Last Name", "Name (First, Last)", "Preferred
+  // First & Last Name". It comes first because the rules below would match the "last name" (or "preferred
+  // first name") inside these labels and type only part of your name. It needs both "first" and "last"
+  // joined by "and", "&", "/"..., so a first-name box with an id like "legalName.firstName" isn't caught.
+  const BOTH_NAMES = /\bfirst( name)? ?(and|&|\/|\+|,) ?last ?names?\b|\bname \(first,? ?(and |& |\/ ?)?last\)|\bprefer\w* full name\b/;
+  const bothNames = (p, label) => [/\bprefer/.test(label) ? p.preferredName || p.firstName : p.firstName, p.lastName].filter(Boolean).join(' ');
+
   // Order matters: the first rule that matches a field wins.
+  // name: true marks your own name, which the report checks against what the site already put there.
   const RULES = [
-    { re: /\bprefer\w* (first )?name\b|\bnick ?name\b|\bgoes by\b|\bknown as\b/, max: 60, not: NOT_SELF, value: (p) => p.preferredName || p.firstName },
-    { re: /\bfirst ?name\b|\bgiven ?name\b|\bforename\b/, ac: ['given-name'], max: 60, not: NOT_SELF, value: (p) => p.firstName },
-    { re: /\blast ?name\b|\bsurname\b|\bfamily ?name\b/, ac: ['family-name'], max: 60, not: NOT_SELF, value: (p) => p.lastName },
-    { re: /^(your |full |legal |candidate |applicant )?(full )?(legal )?name$|^first and last name$|^name \(first and last\)$/, ac: ['name'], max: 40, not: NOT_SELF, value: (p) => [p.firstName, p.lastName].filter(Boolean).join(' ') },
+    { re: BOTH_NAMES, max: 60, not: NOT_SELF, name: true, value: bothNames },
+    { re: /\bprefer\w* (first )?name\b|\bnick ?name\b|\bgoes by\b|\bknown as\b/, max: 60, not: NOT_SELF, name: true, value: (p) => p.preferredName || p.firstName },
+    { re: /\bfirst ?name\b|\bgiven ?name\b|\bforename\b/, ac: ['given-name'], max: 60, not: NOT_SELF, name: true, value: (p) => p.firstName },
+    { re: /\blast ?name\b|\bsurname\b|\bfamily ?name\b/, ac: ['family-name'], max: 60, not: NOT_SELF, name: true, value: (p) => p.lastName },
+    { re: /^(your |full |legal |candidate |applicant )?(full )?(legal )?name$/, ac: ['name'], max: 40, not: NOT_SELF, name: true, value: (p) => [p.firstName, p.lastName].filter(Boolean).join(' ') },
     { re: /\be[ -]?mail\b/, ac: ['email'], type: 'email', max: 80, not: NOT_SELF, value: (p) => p.email },
     { re: /\b(phone|mobile|cell|telephone)\b/, ac: ['tel', 'tel-national'], type: 'tel', max: 60, not: NOT_PHONE, value: (p) => p.phone },
     { re: /\blinked ?in\b/, max: 100, url: true, value: (p) => p.linkedin },
@@ -642,12 +651,21 @@
   // Every field gets one of these calls: the outline on the page, the count in the popup, and a line in
   // the report Claude reads (so it can write application-record.md without reading the page back).
   //   stats.fields:    [{ label, value }]                       filled by AutoInternship just now
-  //   stats.prefilled: [{ label, value }]                       already had a value (you, an earlier fill, or
+  //   stats.prefilled: [{ label, value, profile? }]             already had a value (you, an earlier fill, or
   //                                                             the site itself, like Workday's resume parsing);
   //                                                             never changed, no outline
   //   stats.todo:      [{ label, kind, options?, required? }]   left, with the choices if known
-  function notePrefilled(stats, label, value) {
-    stats.prefilled.push({ label: tidy(label), value: String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 500) });
+  //
+  // profile is set when a name box holds something other than your profile's name. Sites' resume parsers
+  // often split a two-word first name ("Mei Ling Chen" → first "Mei", last "Ling Chen"), and the fill never
+  // overwrites, so the report flags these for Claude rather than leaving it to compare every value. Only
+  // names: other values (phone formats, school names) differ harmlessly too often.
+  // "Phùng" and "PHUNG" match "Phung". đ is its own letter, not d plus an accent, so it's swapped by hand.
+  const fold = (s) => norm(s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd');
+  function notePrefilled(stats, label, value, expected) {
+    const item = { label: tidy(label), value: String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, 500) };
+    if (expected && fold(item.value) !== fold(expected)) item.profile = String(expected).slice(0, 500);
+    stats.prefilled.push(item);
   }
 
   function noteFilled(box, stats, label, value) {
@@ -1055,7 +1073,7 @@
       const kind = tag === 'SELECT' ? 'select' : tag === 'TEXTAREA' ? 'textarea' : 'text';
       const res = answerFor(p, label, hints, el, kind, counters); // runs first so job/school order stays right
       if (hasValue(el)) { // never overwrite
-        notePrefilled(stats, raw, kind === 'select' ? el.options[el.selectedIndex].text : el.value);
+        notePrefilled(stats, raw, kind === 'select' ? el.options[el.selectedIndex].text : el.value, res && res.rule && res.rule.name ? res.value : null);
         continue;
       }
       if (res && apply(el, kind, res)) {
