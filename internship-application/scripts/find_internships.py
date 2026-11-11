@@ -11,8 +11,15 @@ Usage:
   python find_internships.py --folder "JOB_SEARCH_FOLDER" [filters] [--append]
   python find_internships.py --folder "JOB_SEARCH_FOLDER" --tidy
       Moves links in jobs.txt that are already in tracker.xlsx (same link, job ID, or company and role), listed
-      twice, or (for a U.S. profile) outside the U.S. by their note's location, below "# done". Nothing is
-      downloaded and nothing is deleted.
+      twice, or (for a U.S. profile) outside the U.S. by their note's location, below "# done", then re-sorts the
+      queue from the fame levels in the notes. Nothing is downloaded and nothing is deleted.
+  python find_internships.py --folder "JOB_SEARCH_FOLDER" --sort
+      Sets every queued line's fame level ("| fame 1" to "| fame 4" in its note) and sorts the queue.
+
+Queue order (--append, --sort and --tidy all sort it): best-known companies first (fame 1: big tech, AI labs,
+top trading firms and household names; 2: 30+ U.S. listings on SimplifyJobs; 3: 8 to 29; 4: the rest), one
+line per company per round, newest first, and a company only as high as the batch's two-per-company limit
+(tracker rows from today and yesterday) leaves room for. Links added by hand without a note stay on top.
 
 Filters (all optional; without them, sensible defaults come from profile.json in the folder):
   --term "Summer 2027"        internship term (default: profile's internship term, else Summer 2027)
@@ -301,12 +308,163 @@ def name_key(company, role):
     return f'name:{norm(company)}|{norm(role)}' if norm(company) and norm(role) else None
 
 
+# ---- queue order: best-known companies first ----
+
+# Level 1: big tech, AI labs, top trading firms and household names. Seeded with every company SimplifyJobs (its
+# "FAANG+" mark) or speedyapply (its FAANG+ and Quant tables) marked on 2026-11-11, plus the ones those marks
+# miss (SimplifyJobs marks only companies with a row open that day, so Jane Street and Apple weren't marked).
+# speedyapply's tables add to it on every run. A name matches a company name that starts with it ("Citadel"
+# covers "Citadel Securities"; "The Walt Disney Company" is checked without "The").
+FAME_NAMES = [
+    'Adobe', 'Airbnb', 'Amazon', 'AMD', 'American Express', 'Anthropic', 'Apple', 'Atlassian', 'Belvedere Trading', 'Block',
+    'Bloomberg', 'ByteDance', 'Capital One', 'Cisco', 'Citadel', 'Cloudflare', 'Coinbase', 'CrowdStrike', 'D. E. Shaw',
+    'Databricks', 'Datadog', 'Dell Technologies', 'Discord', 'Disney', 'DoorDash', 'Dropbox', 'Duolingo', 'Epic Games', 'Figma',
+    'Five Rings', 'Goldman Sachs', 'Google', 'HP', 'Hudson River Trading', 'IBM', 'IMC', 'Instacart', 'Intel', 'Jane Street',
+    'JPMorgan', 'Jump Trading', 'LinkedIn', 'Lyft', 'Mastercard', 'Meta', 'Microsoft', 'Morgan Stanley', 'Netflix', 'Notion',
+    'NVIDIA', 'OpenAI', 'Optiver', 'Oracle', 'Palantir', 'PayPal', 'Pinterest', 'Plaid', 'Qualcomm', 'Ramp', 'Reddit',
+    'Riot Games', 'Rippling', 'Rivian', 'Robinhood', 'Roblox', 'Salesforce', 'Scale AI', 'Schonfeld', 'ServiceNow', 'Shopify',
+    'Snap', 'Snowflake', 'SpaceX', 'Spotify', 'Square', 'Stripe', 'Susquehanna', 'Tesla', 'TikTok', 'Tinder', 'Twitch',
+    'Two Sigma', 'Uber', 'Visa', 'Walmart', 'Walt Disney', 'Waymo', 'Zoom',
+]
+# Companies whose names start with a level-1 name but aren't that company
+FAME_NOT = {'apple bank'}
+FAME_TAG = re.compile(r'\s*\|\s*fame [1-4]\b')
+
+
+def bare_name(company):
+    words = norm(company).split()
+    return ' '.join(words[1:] if words[:1] == ['the'] else words)
+
+
+def fame_table(simplify, speedy):
+    """What fame_level() needs: the level-1 names, and each company's count of open-or-closed U.S. listings on
+    SimplifyJobs since its list started (a measure of how big an employer it is)."""
+    names = {bare_name(n) for n in FAME_NAMES} | {bare_name(x['company_name']) for x in speedy if x.get('faang') or x.get('quant')}
+    counts = {}
+    for x in simplify:
+        if outside_us(x.get('locations') or []) is not True:
+            c = norm(x.get('company_name'))
+            counts[c] = counts.get(c, 0) + 1
+    return names - {''}, counts
+
+
+def fame_level(company, table):
+    """1 best known (FAME_NAMES), 2 for 30+ U.S. listings, 3 for 8 to 29, 4 for the rest."""
+    names, counts = table
+    b = bare_name(company)
+    if not b:
+        return None
+    if not any(b == x or b.startswith(x + ' ') for x in FAME_NOT) and any(b == n or b.startswith(n + ' ') for n in names):
+        return 1
+    n = counts.get(norm(company), 0)
+    return 2 if n >= 30 else 3 if n >= 8 else 4
+
+
+def queue_line(line):
+    """(company, posted 'YYYY-MM-DD' or '', fame level or None) for a queued line with a note, else None."""
+    m = re.search(r'https?://\S+', line)
+    rest = line[m.end():] if m else ''
+    if not m or '#' not in rest:
+        return None
+    note = rest.split('#', 1)[1]
+    parts = [p.strip() for p in note.split('|')]
+    posted = next((re.search(r'\d{4}-\d{2}-\d{2}', p).group(0) for p in parts if re.match(r'posted \d{4}-\d{2}-\d{2}', p)), '')
+    tag = re.search(r'\|\s*fame ([1-4])\b', note)
+    return parts[0], posted, int(tag.group(1)) if tag else None
+
+
+def with_fame(line, level):
+    """The line with its note's fame tag set to `level`."""
+    return FAME_TAG.sub('', line).rstrip() + f' | fame {level}' if level and queue_line(line) else line
+
+
+def retag(line, table):
+    """The line with its fame level worked out again. Without SimplifyJobs' counts (its download failed), levels
+    2 to 4 can't be told apart, so a line keeps the tag it has unless it's level 1."""
+    q = queue_line(line)
+    if not q:
+        return line
+    level = fame_level(q[0], table)
+    if not table[1] and level != 1 and q[2]:
+        return line
+    return with_fame(line, level)
+
+
+def recent_counts(tracked):
+    """Tracker rows per company added today or yesterday, Skipped ones left out (batch.md's two-per-company limit)."""
+    today = dt.date.today()
+    counts = {}
+    for row in {id(r): r for r in tracked.values()}.values():
+        m = re.search(r'(\d{4})-(\d{2})-(\d{2})', str(row.get('date_added') or ''))
+        if not m or str(row.get('status') or '').strip().lower() == 'skipped':
+            continue
+        if (today - dt.date(*map(int, m.groups()))).days <= 1:
+            c = norm(row.get('company'))
+            counts[c] = counts.get(c, 0) + 1
+    return counts
+
+
+def sort_queue(lines, recent):
+    """jobs.txt's lines with the queue (above '# done') in the order batches should take it.
+
+    Lines without a note (links the user added by hand) and lines without a link stay on top as they were. The
+    rest go by fame level, one line per company per round within a level, newest first within a company. A batch
+    takes at most two postings per company, counting the company's tracker rows from today and yesterday, so a
+    company only keeps as many places at the top as that limit leaves; its other lines follow every company's
+    first ones. Without that, a batch fetching the top of the queue got lines it then had to hold (simulated:
+    a third batch of six picked nothing). Ties go by link, so sorting twice changes nothing.
+    """
+    done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
+    top, items = [], []
+    for line in lines[:done_at]:
+        q = queue_line(line)
+        if q:
+            items.append({'line': line, 'company': norm(q[0]), 'posted': q[1], 'level': q[2] or 4,
+                          'url': re.search(r'https?://\S+', line).group(0)})
+        elif line.strip():
+            top.append(line)
+    ranked = []
+    for level in sorted({i['level'] for i in items}):
+        groups = {}
+        for i in sorted((i for i in items if i['level'] == level), key=lambda i: i['url']):
+            groups.setdefault(i['company'] or i['url'], []).append(i)
+        for g in groups.values():
+            g.sort(key=lambda i: i['posted'], reverse=True)  # stable: equal dates keep link order
+        order = sorted(sorted(groups), key=lambda k: groups[k][0]['posted'], reverse=True)
+        for r in range(max((len(g) for g in groups.values()), default=0)):
+            ranked += [groups[k][r] for k in order if len(groups[k]) > r]
+    first, rest, seen = [], [], {}
+    for i in ranked:
+        k = i['company'] or i['url']
+        (first if seen.get(k, 0) < max(0, 2 - recent.get(i['company'], 0)) else rest).append(i)
+        seen[k] = seen.get(k, 0) + 1
+    queue = top + [i['line'] for i in first + rest]
+    return queue + (['', '# done'] + lines[done_at + 1:] if done_at < len(lines) else [])
+
+
+def write_lines(path, lines):
+    with open(path, 'w', encoding='utf-8') as f:  # rewrites jobs.txt in place; nothing is deleted
+        f.write('\n'.join(lines) + '\n')
+
+
+def sort_summary(lines):
+    done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
+    queued = [queue_line(l) for l in lines[:done_at]]
+    levels = {}
+    for q in queued:
+        if q:
+            levels[f'fame {q[2]}' if q[2] else 'no tag'] = levels.get(f'fame {q[2]}' if q[2] else 'no tag', 0) + 1
+    top = [re.sub(r'\s+', ' ', l.split('#', 1)[1])[:90] for l in lines[:done_at] if queue_line(l)][:8]
+    return {'queued_by_fame': dict(sorted(levels.items())), 'top_of_queue': top}
+
+
 def tidy(folder):
     """Move links already in the tracker, or listed twice, below jobs.txt's '# done' line.
 
     The top of the queue goes stale when a run forgets to move what it processed, and each batch then re-checked
     every pick against tracker.xlsx with one-off scripts. Matching uses the link, its job ID, and the company and
-    role from the line's note (any status counts, Skipped included). Lines are moved, never deleted.
+    role from the line's note (any status counts, Skipped included). Lines are moved, never deleted. Then the
+    queue is sorted (sort_queue) from the fame tags already in the notes.
     """
     jobs_path = os.path.join(folder, 'jobs.txt')
     if not os.path.exists(jobs_path):
@@ -340,14 +498,17 @@ def tidy(folder):
             keep.append(line)
         seen |= links
 
+    merged = lines
     if moved:
         while keep and not keep[-1].strip():
             keep.pop()
         merged = keep + ['', '# done'] + [l for l, _, _ in moved] + lines[done_at + 1:]
-        with open(jobs_path, 'w', encoding='utf-8') as f:  # rewrites jobs.txt in place; nothing is deleted
-            f.write('\n'.join(merged) + '\n')
+    # Re-sort from the fame tags the notes already carry, so this needs no download; untagged lines count as 4.
+    merged = sort_queue(merged, recent_counts(tracked))
+    if merged != lines:
+        write_lines(jobs_path, merged)
     shown = [f'{n[:80]} ({why})' for _, n, why in moved[:10]]
-    return {'ok': True, 'moved_below_done': len(moved),
+    return {'ok': True, **sort_summary(merged), 'moved_below_done': len(moved),
             'in_tracker': sum(1 for *_, why in moved if why.startswith('in tracker')),
             'listed_twice': sum(1 for *_, why in moved if why == 'listed twice'),
             'not_in_us': sum(1 for *_, why in moved if why == 'not in the U.S.'),
@@ -440,12 +601,27 @@ def main():
     ap.add_argument('--limit', type=int, default=25)
     ap.add_argument('--append', action='store_true')
     ap.add_argument('--include-abroad', action='store_true', help='keep listings outside the U.S. (dropped by default for a U.S. profile)')
-    ap.add_argument('--tidy', action='store_true', help='only move queued links already in the tracker below "# done"')
+    ap.add_argument('--tidy', action='store_true', help='only move queued links already in the tracker below "# done", and re-sort the queue')
+    ap.add_argument('--sort', action='store_true', help='only set every queued line\'s fame level and sort the queue')
     a = ap.parse_args()
 
     folder = os.path.abspath(a.folder)
     if a.tidy:
         out(tidy(folder))
+    if a.sort:
+        jobs_path = os.path.join(folder, 'jobs.txt')
+        if not os.path.exists(jobs_path):
+            out({'ok': False, 'error': f'no jobs.txt in {folder}'}, 1)
+        simplify, speedy, failed = fetch()
+        table = fame_table(simplify, speedy)
+        tracked = tracker_index(folder)  # after the downloads (it holds the tracker's lock until exit)
+        lines = open(jobs_path, encoding='utf-8').read().splitlines()
+        done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
+        tagged = [retag(l, table) for l in lines[:done_at]] + lines[done_at:]
+        merged = sort_queue(tagged, recent_counts(tracked))
+        if merged != lines:
+            write_lines(jobs_path, merged)
+        out({'ok': True, **sort_summary(merged), 'sources_failed': failed})
     profile = load_profile(folder)
     defaults_used = {}
 
@@ -565,7 +741,7 @@ def main():
         'url': x.get('url'), 'source': x['source'] if str(x.get('source') or '').startswith('speedyapply') else 'SimplifyJobs',
     } for x in results]
 
-    added = 0
+    added, order = 0, {}
     if a.append and listings:
         new_lines = [f"{l['url']}  # {l['company']} | {l['role']} | {', '.join(l['locations'][:3])} | posted {l['posted']}"
                      for l in listings]
@@ -573,10 +749,12 @@ def main():
         pending, rest = lines[:done_at], lines[done_at:]
         while pending and not pending[-1].strip():
             pending.pop()
-        merged = pending + new_lines + ([''] if rest else []) + rest
-        with open(jobs_path, 'w', encoding='utf-8') as f:  # rewrites jobs.txt in place; nothing is deleted
-            f.write('\n'.join(merged) + '\n')
-        added = len(new_lines)
+        # Every queued line gets its fame level again (the lists change daily), then the whole queue is sorted.
+        table = fame_table(simplify, speedy)
+        pending = [retag(l, table) for l in pending + new_lines]
+        merged = sort_queue(pending + ([''] if rest else []) + rest, recent_counts(tracked))
+        write_lines(jobs_path, merged)
+        added, order = len(new_lines), sort_summary(merged)
 
     down = {f['source'] for f in failed}
     out({'ok': True, 'sources': [r for r in [REPO] + [s['repo'] for s in SPEEDY] if r not in down], 'sources_failed': failed,
@@ -584,7 +762,7 @@ def main():
         'categories': a.category, 'locations': a.location, 'keywords': a.keyword, 'exclude_keywords': a.exclude_keyword,
         'degree': degree, 'drop_no_sponsorship_postings': drop_no_sponsor,
         'drop_citizenship_required': drop_citizenship, 'below_senior': below, 'days': a.days}, 'defaults_from_profile': defaults_used,
-        'matches': total_matches, 'shown': len(listings), 'added_to_jobs_txt': added, 'skipped': skipped, 'listings': listings})
+        'matches': total_matches, 'shown': len(listings), 'added_to_jobs_txt': added, **order, 'skipped': skipped, 'listings': listings})
 
 
 if __name__ == '__main__':
