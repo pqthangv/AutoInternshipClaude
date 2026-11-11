@@ -1,6 +1,6 @@
 ---
 name: internship-application
-description: "Find internships (SimplifyJobs), tailor my Overleaf or Word resume, fill the application (and submit it if I ask) and record what I entered. Use when I share an internship posting or ask to find or apply to one."
+description: "Find internships (SimplifyJobs and speedyapply lists), tailor my Overleaf or Word resume, fill the application (and submit it if I ask) and record what I entered. Use when I share an internship posting or ask to find or apply to one."
 ---
 
 # Internship application
@@ -46,9 +46,9 @@ Checks before saving:
 python scripts/find_internships.py --folder "<job-search folder>" [filters] --append
 ```
 
-It adds open postings from the SimplifyJobs list (github.com/SimplifyJobs/Summer2027-Internships) for the user's term and degree level to jobs.txt, newest first, skipping ones already in the tracker or jobs.txt, and, for a U.S. profile, ones outside the U.S. (`--include-abroad` keeps them). No-sponsorship postings stay in below senior standing (step 2); `--needs-sponsorship` filters them out. Filters: `--category software|data|hardware|product|quant`, `--location` (state codes like CA, cities, SF, NYC, Remote; repeatable), `--keyword` and `--exclude-keyword` on the title, `--days N`, `--limit N`, `--needs-sponsorship`, `--no-citizenship`.
+It adds open postings from the SimplifyJobs list (github.com/SimplifyJobs/Summer2027-Internships) and speedyapply's software and AI/ML lists (github.com/speedyapply/2027-SWE-College-Jobs, 2027-AI-College-Jobs) for the user's term and degree level to jobs.txt, newest first, skipping ones already in the tracker or jobs.txt (same link, job ID, or company and role), and, for a U.S. profile, ones outside the U.S. (`--include-abroad` keeps them). No-sponsorship postings stay in below senior standing (step 2); `--needs-sponsorship` filters them out. Filters: `--category software|data|hardware|product|quant`, `--location` (state codes like CA, cities, SF, NYC, Remote; repeatable), `--keyword` and `--exclude-keyword` on the title, `--days N`, `--limit N`, `--needs-sponsorship`, `--no-citizenship`.
 
-Choose filters from what the user said, else from the profile (major, skills, work preference), and say which. The first time, run it without `--append`, show the matches (company, role, location, posted date) and ask which to queue. After that, or in auto mode, append directly. If the download fails, read the repo page's table in the browser. On code `NETWORK`, pass its `hint` to the user once.
+Choose filters from what the user said, else from the profile (major, skills, work preference), and say which. The first time, run it without `--append`, show the matches (company, role, location, posted date) and ask which to queue. After that, or in auto mode, append directly. If every download fails, read a repo page's table in the browser; if `sources_failed` names only some lists, use the results and mention the missing list in one line. On code `NETWORK`, pass its `hint` to the user once.
 
 Then continue with "Batch runs".
 

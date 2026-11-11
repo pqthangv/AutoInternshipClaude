@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Find internships from the SimplifyJobs list and queue them in jobs.txt.
+"""Find internships from the SimplifyJobs and speedyapply lists and queue them in jobs.txt.
 
-Source: the data file behind https://github.com/SimplifyJobs/Summer2027-Internships (updated daily).
+Sources (updated daily): the data file behind https://github.com/SimplifyJobs/Summer2027-Internships, and the U.S.
+internship tables of https://github.com/speedyapply/2027-SWE-College-Jobs and .../2027-AI-College-Jobs. A job on
+more than one list is taken from SimplifyJobs (it has the term, degree and sponsorship fields). speedyapply has
+none of those: a title naming another term or a graduate degree is dropped, and sponsorship is left to
+fetch_posting.py --profile.
 
 Usage:
   python find_internships.py --folder "JOB_SEARCH_FOLDER" [filters] [--append]
@@ -27,11 +31,14 @@ Filters (all optional; without them, sensible defaults come from profile.json in
   --append                    add the results to jobs.txt (above any "# done" line), one link per line with a note
   --include-abroad            keep listings outside the U.S. (a U.S. profile drops them: the user's call, 2026-11-08)
 
-Skips LinkedIn links (LinkedIn prohibits automated tools) and listings that are closed, already in tracker.xlsx (same company and role) or already in jobs.txt.
-Prints one JSON object. Exit codes: 0 ok, 1 bad input, 6 couldn't download the list (network).
+Skips LinkedIn links (LinkedIn prohibits automated tools) and listings that are closed, already in tracker.xlsx (same
+link, job ID, or company and role) or already in jobs.txt.
+Prints one JSON object. Exit codes: 0 ok, 1 bad input, 6 couldn't download any list (network). When only some lists
+download, the others still give results and `sources_failed` names the missing ones.
 """
 import argparse
 import datetime as dt
+import html
 import json
 import os
 import re
@@ -41,6 +48,14 @@ import urllib.request
 
 SOURCE = 'https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json'
 REPO = 'https://github.com/SimplifyJobs/Summer2027-Internships'
+# speedyapply's README is its U.S. internship list (INTERN_INTL.md holds the rest), in three tables: FAANG+, Quant
+# and Other. Each is software (SWE) or AI/ML (AI) only.
+SPEEDY = [
+    {'name': 'speedyapply SWE', 'repo': 'https://github.com/speedyapply/2027-SWE-College-Jobs', 'category': 'Software',
+     'url': 'https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/main/README.md', 'cache': 'speedyapply-2027-swe.md'},
+    {'name': 'speedyapply AI', 'repo': 'https://github.com/speedyapply/2027-AI-College-Jobs', 'category': 'AI/ML/Data',
+     'url': 'https://raw.githubusercontent.com/speedyapply/2027-AI-College-Jobs/main/README.md', 'cache': 'speedyapply-2027-ai.md'},
+]
 CATEGORIES = {
     'software': {'Software', 'Software Engineering'},
     'data': {'AI/ML/Data', 'Data Science, AI & Machine Learning'},
@@ -81,6 +96,28 @@ def degree_level(text):
     if re.search(r'bachelor|\bb ?s\b|\bb ?a\b|\bb ?sc\b|\bb ?eng\b|undergrad', t):
         return "Bachelor's"
     return None
+
+
+def title_term_ok(title, term):
+    """For a listing with no term field: False when its title names another term ("Spring 2027 Co-op", "Fall
+    2026"). A graduation term in the title ("(Grad Year: Spring 2028)") isn't the internship's."""
+    t = re.sub(r'\(?\b(grad(uation)?|graduat\w*|class of)\b[^)]*\)?', ' ', str(title or '').lower())
+    season, year = term.lower().split()
+    named = set(re.findall(r'\b(summer|fall|autumn|winter|spring)\b', t))
+    if named and season not in named and not (season == 'fall' and 'autumn' in named):
+        return False
+    years = set(re.findall(r'\b(20\d{2})\b', t))
+    return not years or year in years
+
+
+GRAD_TITLE = re.compile(r'\b(ph\.?\s?d|doctoral|doctorate|master\'?s|mba)\b')
+UNDERGRAD_TITLE = re.compile(r'\b(bachelor\w*|undergrad\w*|bs|ba)\b')
+
+
+def title_rules_out(title, degree):
+    """For a listing with no degree field: True when the title asks for a graduate degree an undergraduate lacks."""
+    t = str(title or '').lower()
+    return degree in ("Bachelor's", "Associate's") and bool(GRAD_TITLE.search(t)) and not UNDERGRAD_TITLE.search(t)
 
 
 def load_profile(folder):
@@ -166,42 +203,57 @@ def outside_us(places):
     return None
 
 
-def tracker_keys(folder):
+def tracker_index(folder):
+    """Each tracker row under every key that can recognize its posting: the link, its job ID, and company + role.
+    By name alone, 54 tracker rows didn't match the same jobs on speedyapply, whose titles differ ("Software
+    Engineering Intern - iOS - Summer 2027" for "Software Engineering Intern - iOS")."""
     path = os.path.join(folder, 'tracker.xlsx')
-    keys = set()
+    tracked = {}
     if not os.path.exists(path):
-        return keys
-    try:
-        from openpyxl import load_workbook
-        ws = load_workbook(path, read_only=True).active
-        for i, row in enumerate(ws.iter_rows(values_only=True)):
-            if i == 0 or not row:
-                continue
-            keys.add((norm(row[2]), norm(row[3])))  # company, role
-    except Exception:
-        pass
-    return keys
+        return tracked
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import tracker  # prints its own error and exits when openpyxl is missing
+    tracker.lock_tracker(path)  # never read the workbook halfway through another call's save
+    _, ws, _ = tracker.open_book(path)
+    for row in tracker.rows(ws):
+        row = tracker.read_links(ws, row)
+        for k in posting_keys(row['posting_url'], row['company']) | {name_key(row['company'], row['role'])}:
+            if k:
+                tracked.setdefault(k, row)
+    return tracked
 
 
-def jobs_urls(path):
+def jobs_keys(path):
+    """posting_keys of every link in jobs.txt, queued or done, and its lines."""
     if not os.path.exists(path):
         return set(), []
     lines = open(path, encoding='utf-8').read().splitlines()
-    urls = {m.group(0).split('?')[0].rstrip('/') for l in lines for m in [re.search(r'https?://\S+', l)] if m}
-    return urls, lines
+    keys = set()
+    for l in lines:
+        m = re.search(r'https?://\S+', l)
+        if m:
+            rest = l[m.end():]
+            company = rest.split('#', 1)[1].split('|')[0].strip() if '#' in rest else None
+            keys |= posting_keys(m.group(0), company)
+    return keys, lines
 
 
 UUID = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 # Query parameters that say where a click came from or how the page is shown, not which job it is
-TRACKING = re.compile(r'(utm_[a-z]+|gh_src|source|src|ref|referrer|lever-source|lever-origin|embed|in_iframe|mode|iis|iisn)$')
+TRACKING = re.compile(r'(utm_[a-z]+|gh_src|source|src|ref|referrer|lever-source|lever-origin|embed|in_iframe|mode|iis|iisn|'
+                      r'ats|icims|lang|locale|mobile|needsredirect)$')  # SimplifyJobs adds ?ats=successfactors, ?icims=1&lang=en-us
 
 
-def posting_keys(url):
+def posting_keys(url, company=None):
     """Every way to recognize one posting behind different links.
 
     The same job turns up as boards.greenhouse.io/x/jobs/1 and job-boards.greenhouse.io/x/jobs/1?gh_src=...,
     as a company page with ?gh_jid=1, as an Ashby link with and without /application?embed=true, or as a Workday
     link whose location part differs. Comparing whole links missed those, so each link also yields its job ID.
+    Lists disagree on links and titles too: speedyapply has amazon.jobs/jobs/10587999/apply where SimplifyJobs has
+    amazon.jobs/en/jobs/10587999/<slug>, and us-careers-rivian.icims.com/jobs/33801/job where SimplifyJobs has
+    careers.rivian.com/jobs/33801?icims=1, under a shorter title. iCIMS numbers its jobs per company, so its key
+    holds the site (or, given `company`, the company name).
     """
     m = re.match(r'https?://(?:www\.)?([^/?#\s]+)([^?#\s]*)(?:\?([^#\s]*))?', str(url or '').strip().lower())
     if not m:
@@ -227,6 +279,21 @@ def posting_keys(url):
         tenant = host.split('.')[0] if 'myworkdayjobs' in host else after
         if req:  # requisition numbers repeat across companies, so the tenant is part of the key
             keys.add(f'workday:{tenant}:{req.group(1)}')
+    if host.endswith('amazon.jobs'):
+        a = re.search(r'/jobs/(\d+)', path)
+        if a:
+            keys.add('amazon:' + a.group(1))
+    if host.endswith('smartrecruiters.com'):
+        s = re.search(r'^/[^/]+/(\d{6,})', path)  # /<Company>/<posting id>[-slug]
+        if s:
+            keys.add('smartrecruiters:' + s.group(1))
+    icims = host.endswith('icims.com') or host.endswith('jibeapply.com') or re.search(r'(?:^|&)icims=1', query)
+    j = re.search(r'/jobs/(\d+)', path) if icims else None
+    if j:
+        if host.endswith('icims.com'):
+            keys.add(f'icims:{host}:{j.group(1)}')
+        if norm(company):
+            keys.add(f'icims:{norm(company)}:{j.group(1)}')
     return keys
 
 
@@ -242,20 +309,9 @@ def tidy(folder):
     role from the line's note (any status counts, Skipped included). Lines are moved, never deleted.
     """
     jobs_path = os.path.join(folder, 'jobs.txt')
-    tracker_path = os.path.join(folder, 'tracker.xlsx')
     if not os.path.exists(jobs_path):
         out({'ok': False, 'error': f'no jobs.txt in {folder}'}, 1)
-    tracked = {}
-    if os.path.exists(tracker_path):
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import tracker  # prints its own error and exits when openpyxl is missing
-        tracker.lock_tracker(tracker_path)  # never read the workbook halfway through another call's save
-        _, ws, _ = tracker.open_book(tracker_path)
-        for row in tracker.rows(ws):
-            row = tracker.read_links(ws, row)
-            for k in posting_keys(row['posting_url']) | {name_key(row['company'], row['role'])}:
-                if k:
-                    tracked.setdefault(k, row)
+    tracked = tracker_index(folder)
 
     lines = open(jobs_path, encoding='utf-8').read().splitlines()
     done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
@@ -269,7 +325,7 @@ def tidy(folder):
         rest = line[m.end():]
         note = rest.split('#', 1)[1].strip() if '#' in rest else ''
         parts = [p.strip() for p in note.split('|')]
-        links = posting_keys(m.group(0))
+        links = posting_keys(m.group(0), parts[0] if note else None)
         # The same title at the same company counts as applied (the tracker row), but two queued lines count as
         # duplicates only by link or job ID: one title is often posted separately per city (Chicago, London).
         named = {name_key(parts[0], parts[1])} - {None} if len(parts) > 1 else set()
@@ -299,19 +355,74 @@ def tidy(folder):
             'moved': shown + ([f'... {len(moved) - 10} more'] if len(moved) > 10 else [])}
 
 
+def download(url, cache_name):
+    """The file's bytes, from a copy in the temp folder when it's under 3 hours old."""
+    cache = os.path.join(tempfile.gettempdir(), cache_name)
+    if os.path.exists(cache) and (dt.datetime.now().timestamp() - os.path.getmtime(cache)) < 3 * 3600:
+        return open(cache, 'rb').read()
+    req = urllib.request.Request(url, headers={'User-Agent': 'internship-application-skill'})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        data = r.read()
+    open(cache, 'wb').write(data)  # temp folder only
+    return data
+
+
 def fetch():
-    cache = os.path.join(tempfile.gettempdir(), 'simplify-summer2027-listings.json')
+    """(SimplifyJobs listings, speedyapply rows, the lists that failed). Exits only when every list failed."""
+    failed, simplify, speedy = [], [], []
     try:
-        if os.path.exists(cache) and (dt.datetime.now().timestamp() - os.path.getmtime(cache)) < 3 * 3600:
-            return json.load(open(cache, encoding='utf-8'))
-        req = urllib.request.Request(SOURCE, headers={'User-Agent': 'internship-application-skill'})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            data = r.read()
-        open(cache, 'wb').write(data)  # temp folder only
-        return json.loads(data)
+        simplify = json.loads(download(SOURCE, 'simplify-summer2027-listings.json'))
     except Exception as e:
-        out({'ok': False, 'code': 'NETWORK', 'error': f'Could not download the SimplifyJobs list: {e}',
+        failed.append({'source': REPO, 'error': str(e)})
+    for src in SPEEDY:
+        try:
+            rows = speedy_rows(download(src['url'], src['cache']).decode('utf-8', 'replace'), src)
+            if not rows:
+                raise ValueError('no table rows found (the page layout may have changed)')
+            speedy += rows
+        except Exception as e:
+            failed.append({'source': src['repo'], 'error': str(e)})
+    if not simplify and not speedy:
+        out({'ok': False, 'code': 'NETWORK', 'error': 'Could not download any job list: ' + '; '.join(f"{f['source']}: {f['error']}" for f in failed),
              'hint': f'Allow raw.githubusercontent.com in network settings, or open {REPO} in the browser and read the table there.'}, 6)
+    return simplify, speedy, failed
+
+
+TABLE = re.compile(r'<!-- TABLE_(?:(FAANG|QUANT)_)?START -->(.*?)<!-- TABLE_(?:FAANG_|QUANT_)?END -->', re.S)
+
+
+def cell_text(c):
+    return html.unescape(re.sub(r'<[^>]+>', '', c)).strip()
+
+
+def speedy_rows(md, src):
+    """speedyapply's tables as listings shaped like SimplifyJobs' (fields it lacks stay empty). Columns come from each
+    table's header row: FAANG+ and Quant tables have a Salary column, Other doesn't. "Age" is days since posting."""
+    now = dt.datetime.now().timestamp()
+    rows = []
+    for table, body in TABLE.findall(md):
+        header = None
+        for line in body.splitlines():
+            if not line.startswith('|') or re.match(r'\|\s*-{3}', line):
+                continue
+            cells = [c.strip() for c in line.strip().strip('|').split(' | ')]
+            if header is None:
+                header = [norm(c) for c in cells]
+                continue
+            if len(cells) != len(header):
+                continue
+            c = dict(zip(header, cells))
+            link = re.search(r'href="([^"]+)"', c.get('posting', ''))
+            age = re.match(r'(\d+)\s*d', c.get('age', ''))
+            if not link or not cell_text(c.get('company', '')):
+                continue
+            place = re.sub(r'\s*\+\d+$', '', cell_text(c.get('location', '')))  # "Palo Alto, CA +1": one more city not shown
+            rows.append({'company_name': cell_text(c['company']), 'title': cell_text(c.get('position', '')),
+                         'locations': [place] if place else [], 'url': html.unescape(link.group(1)), 'active': True,
+                         'terms': None, 'category': src['category'], 'quant': table == 'QUANT', 'faang': table == 'FAANG',
+                         'degrees': [], 'sponsorship': '', 'source': src['name'],
+                         'date_posted': now - int(age.group(1)) * 86400 if age else None})
+    return rows
 
 
 def main():
@@ -367,11 +478,36 @@ def main():
             out({'ok': False, 'error': f'unknown category: {c}', 'categories': ['software', 'data', 'hardware', 'product', 'quant']}, 1)
         cats |= CATEGORIES[key]
 
-    data = fetch()
+    simplify, speedy, failed = fetch()
+    # A job on both lists is taken from SimplifyJobs. A closed SimplifyJobs entry matches only by link or job ID:
+    # by company and title, an old closed posting would hide this year's open one.
+    all_links, open_links, open_names = set(), set(), set()
+    for x in simplify:
+        keys = posting_keys(x.get('url'), x.get('company_name'))
+        all_links |= keys
+        if x.get('active') and x.get('is_visible', True):
+            open_links |= keys
+            open_names.add(name_key(x.get('company_name'), x.get('title')))
+    extra, seen_speedy = [], set()
+    counted = {'rows': len(speedy), 'on_simplifyjobs': 0, 'closed_on_simplifyjobs': 0, 'on_both_speedyapply_lists': 0}
+    for x in speedy:
+        keys = posting_keys(x['url'], x['company_name'])
+        named = {name_key(x['company_name'], x['title'])} - {None}
+        if keys & open_links or named & open_names:
+            counted['on_simplifyjobs'] += 1
+        elif keys & all_links:
+            counted['closed_on_simplifyjobs'] += 1
+        elif (keys | named) & seen_speedy:
+            counted['on_both_speedyapply_lists'] += 1
+        else:
+            extra.append(x)
+        seen_speedy |= keys | named
+    counted['added_by_speedyapply'] = len(extra)
+
     cutoff = (dt.datetime.now() - dt.timedelta(days=a.days)).timestamp() if a.days else None
-    tracked = tracker_keys(folder)
+    tracked = tracker_index(folder)  # after the downloads: it holds the tracker's lock until this process exits
     jobs_path = os.path.join(folder, 'jobs.txt')
-    queued, lines = jobs_urls(jobs_path)
+    queued, lines = jobs_keys(jobs_path)
     kw = [norm(k) for k in a.keyword]
     ex = [norm(k) for k in a.exclude_keyword]
 
@@ -379,14 +515,14 @@ def main():
                'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0}
     us_only = home_is_us(profile) and not a.include_abroad
     results = []
-    for x in data:
+    for x in simplify + extra:
         if 'linkedin.com' in (x.get('url') or '').lower():  # never queue LinkedIn; apply on the company's site
             skipped['linkedin_link'] += 1; continue
         if not x.get('active') or not x.get('is_visible', True):
             skipped['closed'] += 1; continue
-        if term not in (x.get('terms') or []):
+        if not (term in x['terms'] if x.get('terms') is not None else title_term_ok(x.get('title'), term)):
             skipped['term'] += 1; continue
-        if cats and x.get('category') not in cats:
+        if cats and not ({x.get('category')} | ({'Quant'} if x.get('quant') else set())) & cats:
             skipped['category'] += 1; continue
         if not location_match(x.get('locations') or [], a.location):
             skipped['location'] += 1; continue
@@ -396,7 +532,7 @@ def main():
         if (kw and not any(k in title for k in kw)) or any(k in title for k in ex):
             skipped['keyword'] += 1; continue
         degrees = x.get('degrees') or []
-        if degree and degrees and degree not in degrees:
+        if (degree and degrees and degree not in degrees) or (not degrees and title_rules_out(x.get('title'), degree)):
             skipped['degree'] += 1; continue
         sp = x.get('sponsorship', '')
         if (drop_no_sponsor and sp == 'Does Not Offer Sponsorship') or \
@@ -404,9 +540,10 @@ def main():
             skipped['sponsorship'] += 1; continue
         if cutoff and (x.get('date_posted') or 0) < cutoff:
             skipped['too_old'] += 1; continue
-        if (norm(x.get('company_name')), title) in tracked:
+        keys = posting_keys(x.get('url'), x.get('company_name'))
+        if (keys | {name_key(x.get('company_name'), x.get('title'))}) & tracked.keys():
             skipped['already_tracked'] += 1; continue
-        if x.get('url', '').split('?')[0].rstrip('/') in queued:
+        if keys & queued:
             skipped['already_in_jobs_txt'] += 1; continue
         results.append(x)
 
@@ -425,7 +562,7 @@ def main():
         'company': x['company_name'], 'role': x['title'], 'locations': x.get('locations', []),
         'posted': dt.date.fromtimestamp(x['date_posted']).isoformat() if x.get('date_posted') else '',
         'category': x.get('category'), 'degrees': x.get('degrees', []), 'sponsorship': x.get('sponsorship'),
-        'url': x.get('url'),
+        'url': x.get('url'), 'source': x['source'] if str(x.get('source') or '').startswith('speedyapply') else 'SimplifyJobs',
     } for x in results]
 
     added = 0
@@ -441,7 +578,9 @@ def main():
             f.write('\n'.join(merged) + '\n')
         added = len(new_lines)
 
-    out({'ok': True, 'source': REPO, 'term': term, 'filters': {
+    down = {f['source'] for f in failed}
+    out({'ok': True, 'sources': [r for r in [REPO] + [s['repo'] for s in SPEEDY] if r not in down], 'sources_failed': failed,
+         'speedyapply': counted, 'term': term, 'filters': {
         'categories': a.category, 'locations': a.location, 'keywords': a.keyword, 'exclude_keywords': a.exclude_keyword,
         'degree': degree, 'drop_no_sponsorship_postings': drop_no_sponsor,
         'drop_citizenship_required': drop_citizenship, 'below_senior': below, 'days': a.days}, 'defaults_from_profile': defaults_used,

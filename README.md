@@ -4,7 +4,7 @@ Two Claude skills and a Chrome extension for internship applications. They find 
 
 | Part | What it does |
 |---|---|
-| [`internship-application`](internship-application/) | Finds internships from the [SimplifyJobs list](https://github.com/SimplifyJobs/Summer2027-Internships), tailors and fact-checks your resume (Overleaf or Word), writes a cover letter wherever the form has a place for one, fills the application and records what it entered. |
+| [`internship-application`](internship-application/) | Finds internships from the [SimplifyJobs](https://github.com/SimplifyJobs/Summer2027-Internships) and speedyapply ([software](https://github.com/speedyapply/2027-SWE-College-Jobs), [AI/ML](https://github.com/speedyapply/2027-AI-College-Jobs)) lists, tailors and fact-checks your resume (Overleaf or Word), writes a cover letter wherever the form has a place for one, fills the application and records what it entered. |
 | [`internship-tracker`](internship-tracker/) | Keeps `tracker.xlsx` up to date with statuses, follow-ups and interview prep. |
 | [`autointernship`](autointernship/) | The AutoInternship Chrome extension. Fills the predictable fields (name, contact details, school, links, yes-or-no questions, dropdowns, self-identification answers you chose) from your saved profile, instantly and without using Claude. Claude finishes the rest. |
 
