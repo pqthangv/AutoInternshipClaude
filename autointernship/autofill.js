@@ -143,6 +143,11 @@
     return authorized === 'yes' && need === 'no' ? 'yes' : null;
   }
 
+  // "Are you currently authorized to work under OPT?" asks about one permit, not whether you may work: a student
+  // on F-1 with CPT is authorized, but not under OPT, and the work-authorization answer gave it Yes. A question
+  // that names a visa or permit is left ("opt in" and "opt out" aren't OPT).
+  const NAMES_PERMIT = /\bopt\b(?![\s-]?(in|out)\b)|\b(optional|curricular) practical training\b|\bcpt\b|\bh-?1-?b\b|\b[fj]-?1\b|\bead\b|\bgreen card\b|\bvisas?\b/;
+
   // Government ties, asked on many finance, consulting and defense applications for anti-bribery checks:
   // "Are you, or have you been, a government official or employee?", "Is a close relative a public official?".
   // Questions that only mention government for another reason (a security clearance, a government-issued ID,
@@ -219,9 +224,13 @@
 
     { re: /\byears of (\w+ )?experience\b|\bhow many years\b/, max: 70, not: /\b(with|using|in)\b/, value: (p) => p.yearsExperience },
     { re: /\bsponsor\w*/, max: 250, yesno: true, countryCheck: true, kinds: YESNO_KINDS, value: sponsorQuestion },
-    { re: /\b(authori[sz]ed|eligible|permitted|entitled|legally able|allowed) to work\b|\bwork authori[sz]ation\b|\bright to work\b/, max: 250, not: /\bsponsor\w*/, yesno: true, countryCheck: true, kinds: YESNO_KINDS, value: (p) => yn(p.workAuthorized) },
+    { re: /\b(authori[sz]ed|eligible|permitted|entitled|legally able|allowed) to work\b|\bwork authori[sz]ation\b|\bright to work\b/, max: 250, not: /\bsponsor\w*/, yesno: true, countryCheck: true, kinds: YESNO_KINDS, value: (p, label) => (NAMES_PERMIT.test(noExamples(label)) ? null : yn(p.workAuthorized)) },
     { re: GOVERNMENT, max: 300, not: GOVERNMENT_NOT, yesno: true, kinds: YESNO_KINDS, value: governmentAnswer },
-    { re: /\brelocat\w*/, max: 200, not: /\b(assistance|package|benefit\w*|support|cost\w*|expenses?)\b/, yesno: true, kinds: YESNO_KINDS, value: (p) => yn(p.willingToRelocate) },
+    // A text box gets Yes only for "will you relocate?": Oracle forms also have "Length of Willing to Relocate"
+    // and "Relocation Reason" boxes, which got "Yes" typed into them. Lists and radio buttons offer Yes/No
+    // themselves, so they keep the shorter exclusions ("Willing to relocate? If not, please explain").
+    { re: /\brelocat\w*/, max: 200, not: /\b(assistance|package|benefit\w*|support|cost\w*|expenses?)\b/, yesno: true, kinds: ['select', 'radio'], value: (p) => yn(p.willingToRelocate) },
+    { re: /\brelocat\w*/, max: 200, not: /\b(assistance|package|benefit\w*|support|cost\w*|expenses?|length|reasons?|why|which|how|explain|describe|preferred)\b/, yesno: true, kinds: ['text'], value: (p) => yn(p.willingToRelocate) },
     { re: /\bsalary\b|\bcompensation\b|\bpay (expectations?|range|requirements?)\b|\b(desired|expected) (pay|rate)\b|\brate expectations?\b|\bhourly rate\b/, max: 120, not: /\b(current|previous|prior|last)\b/, kinds: ['text', 'textarea', 'select'], value: (p) => p.salary },
     // Not a bare "start date": that label also appears in work-history rows.
     { re: /\bnotice period\b|\bearliest (possible )?start\b|\b(available|availability|desired|preferred|internship|anticipated) start( date)?\b|\bwhen (can|could) you (start|begin)\b|\bavailab\w* to (start|begin)\b|\bdate available\b/, max: 100, kinds: ['text', 'textarea'], value: (p) => p.availableFrom || p.startDate },
@@ -452,18 +461,75 @@
       }
     }
     if (score >= 0.6) return best;
+    // A saved answer like "Yes (can start before June 10, 2027)" matches no option of a Yes/No list; its first
+    // word does. Only after the whole answer found nothing, so "No preference" still picks "No preference".
+    if (res.lead) {
+      const want = res.lead === 'yes' ? /^yes\b/ : /^no\b/;
+      const o = opts.find((x) => want.test(norm(x.text)));
+      if (o) return o;
+    }
     // No option matches: the graduation rule takes the closest date offered (see nearestDate), marked so the
     // report can flag it.
     const near = res.rule && res.rule.nearestDate ? nearestDate(opts, res.value) : null;
     return near ? { ...near, nearest: true } : null;
   }
 
-  function resolve(p, label, hints, el, kind, counters) {
-    // 1. Your saved answers come first.
+  // The questions in a label: its sentences ending in "?", or the whole label when none does. Sentences end at
+  // ". ", "? " or "! ", not inside "U.S.", "e.g." or "3.0", and not at "..." (text left out).
+  const ABBR_END = /(^|[\s(])([a-z]\.)+$|\b(etc|inc|ltd|co|corp|st|vs|no|jr|sr|dr|mr|mrs|ms|approx|dept)\.$/;
+  function questionsOf(label) {
+    const parts = [];
+    let start = 0;
+    for (let i = 0; i < label.length; i++) {
+      const ch = label[i];
+      if (ch !== '.' && ch !== '?' && ch !== '!') continue;
+      if (i + 1 < label.length && !/\s/.test(label[i + 1])) continue;
+      if (ch === '.' && (label[i - 1] === '.' || ABBR_END.test(label.slice(start, i + 1)))) continue;
+      parts.push(label.slice(start, i + 1).trim());
+      start = i + 1;
+    }
+    if (start < label.length) parts.push(label.slice(start).trim());
+    const asks = parts.filter((s) => s.endsWith('?'));
+    return asks.length ? asks : [label];
+  }
+
+  // A saved answer's phrase has to be in the question as whole words (a plural or -ing/-ed ending allowed):
+  // plain substring matching put a "travel" answer into "Previously worked for Travelers?" and an "aws" answer
+  // into "relatives or in-laws currently employed at ...?". A statement in front of the question doesn't count
+  // (Addepar: "... relocation assistance is not provided. Are you able to work on-site?" got the
+  // relocation-assistance answer, No), and neither does an ability question with the phrase after with/without
+  // ("Can you perform these essential functions with reasonable accommodation?" got the accommodation answer).
+  const ABILITY = /\b(can|could|are) you\b|\bable to\b/;
+  function savedHit(m, label) {
+    const re = new RegExp('(?<![a-z0-9])' + esc(m) + '(s|es|ing|ling|ed|led)?(?![a-z0-9])', 'g');
+    for (const q of questionsOf(label)) {
+      for (const hit of q.matchAll(re)) {
+        const before = q.slice(0, hit.index);
+        if (/\b(with|without)\s+(a\s+|any\s+)?$/.test(before) && ABILITY.test(before)) continue;
+        return true;
+      }
+    }
+    return false;
+  }
+  // When several match, the longest phrase wins: it's the most specific ("gpa 3.0 or higher" = Yes over
+  // "cumulative gpa" = 4.0 for "Is your cumulative GPA 3.0 or higher?").
+  function savedAnswer(p, label) {
+    let best = null;
+    let len = 0;
     for (const sa of p.savedAnswers || []) {
       const m = norm(sa.match);
       const ans = (sa.answer || '').trim();
-      if (m && ans && label.includes(m)) return { value: ans, yesno: yn(ans.toLowerCase()), rule: null };
+      if (m && ans && m.length > len && savedHit(m, label)) { best = ans; len = m.length; }
+    }
+    return best;
+  }
+
+  function resolve(p, label, hints, el, kind, counters) {
+    // 1. Your saved answers come first.
+    const saved = savedAnswer(p, label);
+    if (saved) {
+      const lead = saved.toLowerCase().match(/^(yes|no)\b/);
+      return { value: saved, yesno: yn(saved.toLowerCase()), lead: lead && lead[1], rule: null };
     }
     // 2. Built-in rules.
     for (const rule of RULES) {
@@ -585,7 +651,9 @@
         // "I identify as a veteran, just not a protected veteran" also contains "not a protected veteran", so any
         // option that says you are a veteran is ruled out. The old test for "veteran but" missed it: norm() keeps
         // the comma, and Workday writes "just not". It was picked for non-veterans whenever it came first.
-        if (p.veteranStatus === 'no') return [has(/^no\b/, DECLINE), has(/\bnot a (protected )?veteran\b/, /\b(identify as|am|i'm) a veteran\b/, DECLINE)];
+        // Assurant's Workday list also has "I am not a protected veteran (I served in the military but do not
+        // fall into ...)" beside "I am not a Veteran (I did not serve ...)", and the first was picked.
+        if (p.veteranStatus === 'no') return [has(/^no\b/, DECLINE), has(/\bnot a (protected )?veteran\b/, /\b(identify as|am|i'm) a veteran\b|\bi (have )?served\b/, DECLINE)];
         if (p.veteranStatus === 'protected') return [has(/^yes\b/, DECLINE), has(/\bidentify as (one or more|a protected)\b|\bprotected veteran\b/, /\bnot\b/, DECLINE)];
         return [];
       case 'disability':
@@ -678,6 +746,16 @@
       return !!o && !isPlaceholderOpt(o.text, o.value);
     }
     return String(el.value || '').trim() !== '';
+  }
+
+  // True (and the box emptied again) when the box dropped the decimal point of a number typed into it.
+  function lostDecimal(el, res) {
+    const typed = String(res.value || '').trim();
+    if (res.yesno || !/^\d+\.\d+$/.test(typed)) return false;
+    const now = String(el.value || '').trim();
+    if (now.includes('.') || now.replace(/\D/g, '') !== typed.replace('.', '')) return false;
+    setValue(el, '');
+    return true;
   }
 
   function apply(el, kind, res) {
@@ -1319,7 +1397,8 @@
       }
       // hasValue: some boxes throw away what they don't accept (Workday's compensation box kept nothing of
       // "Flexible"), and those were reported as Filled with an empty value.
-      if (res && apply(el, kind, res) && hasValue(el)) {
+      // A box that changes the number is undone and left: a digits-only GPA box turned "4.0" into "40" (Bass Pro).
+      if (res && apply(el, kind, res) && hasValue(el) && !lostDecimal(el, res)) {
         noteFilled(el, stats, raw, kind === 'select' ? el.options[el.selectedIndex].text : el.value, res.nearest ? res.value : null);
       } else {
         const options = kind === 'select' ? optionTexts([...el.options].map((o) => ({ text: o.text, val: o.value }))) : null;

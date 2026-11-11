@@ -35,7 +35,7 @@ Name, contact details, address, links, education, student questions (graduation,
 
 - **Sponsorship** has two answers: "now or in the future" and "for the internship itself". If a question could mean either, it's filled only when both answers match.
 - **Voluntary self-identification** (gender, pronouns, Hispanic or Latino, race, veteran, disability, LGBTQ+, transgender, sexual orientation) is filled only with the choice you pick for each, including "Decline to answer". "Not set" leaves it for you.
-- **Saved answers** teach it new questions: if a question contains your phrase, it uses your answer.
+- **Saved answers** teach it new questions: if the question itself (not a sentence before it) contains your phrase as whole words, it uses your answer. When several phrases fit, the longest wins.
 
 It always leaves these for you or Claude: open-ended questions, cover letters, consent and "I certify" checkboxes, religion and marital status questions, ID numbers, date of birth, bank details, and anything it can't match confidently.
 
