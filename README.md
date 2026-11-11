@@ -4,7 +4,7 @@ Two Claude skills and a Chrome extension for internship applications. They find 
 
 | Part | What it does |
 |---|---|
-| [`internship-application`](internship-application/) | Finds internships from the [SimplifyJobs list](https://github.com/SimplifyJobs/Summer2027-Internships), tailors and fact-checks your resume (Overleaf or Word), writes a cover letter wherever the form has a place for one, fills the application and records what it entered. |
+| [`internship-application`](internship-application/) | Finds internships from the [SimplifyJobs](https://github.com/SimplifyJobs/Summer2027-Internships) and speedyapply ([software](https://github.com/speedyapply/2027-SWE-College-Jobs), [AI/ML](https://github.com/speedyapply/2027-AI-College-Jobs)) lists, tailors and fact-checks your resume (Overleaf or Word), writes a cover letter wherever the form has a place for one, fills the application and records what it entered. |
 | [`internship-tracker`](internship-tracker/) | Keeps `tracker.xlsx` up to date with statuses, follow-ups and interview prep. |
 | [`autointernship`](autointernship/) | The AutoInternship Chrome extension. Fills the predictable fields (name, contact details, school, links, yes-or-no questions, dropdowns, self-identification answers you chose) from your saved profile, instantly and without using Claude. Claude finishes the rest. |
 
@@ -30,7 +30,7 @@ It submits only when you ask it to, and never uses LinkedIn, never types passwor
 3. Open the Claude desktop app, go to **Cowork** and choose your job-search folder ([help](https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork)).
 4. Ask Claude to apply: see [Your first batch](#your-first-batch).
 
-In a batch, Claude tailors all the resumes at once and fills all the forms at the same time. It applies to at most two roles per company in a day, so recruiters don't see a flood of applications from you; the rest wait in `jobs.txt`.
+In a batch, Claude tailors all the resumes at once and fills all the forms at the same time. It takes jobs from the top of `jobs.txt`, which it keeps sorted with the best-known companies first (a posting that closes within 3 days goes ahead). It applies to at most two roles per company in a day, so recruiters don't see a flood of applications from you; the rest wait in `jobs.txt`.
 
 Claude adds `Applications/` (one folder per application) and `tracker.xlsx` to your folder.
 

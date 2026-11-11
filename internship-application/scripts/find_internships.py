@@ -1,14 +1,25 @@
 #!/usr/bin/env python3
-"""Find internships from the SimplifyJobs list and queue them in jobs.txt.
+"""Find internships from the SimplifyJobs and speedyapply lists and queue them in jobs.txt.
 
-Source: the data file behind https://github.com/SimplifyJobs/Summer2027-Internships (updated daily).
+Sources (updated daily): the data file behind https://github.com/SimplifyJobs/Summer2027-Internships, and the U.S.
+internship tables of https://github.com/speedyapply/2027-SWE-College-Jobs and .../2027-AI-College-Jobs. A job on
+more than one list is taken from SimplifyJobs (it has the term, degree and sponsorship fields). speedyapply has
+none of those: a title naming another term or a graduate degree is dropped, and sponsorship is left to
+fetch_posting.py --profile.
 
 Usage:
   python find_internships.py --folder "JOB_SEARCH_FOLDER" [filters] [--append]
   python find_internships.py --folder "JOB_SEARCH_FOLDER" --tidy
       Moves links in jobs.txt that are already in tracker.xlsx (same link, job ID, or company and role), listed
-      twice, or (for a U.S. profile) outside the U.S. by their note's location, below "# done". Nothing is
-      downloaded and nothing is deleted.
+      twice, or (for a U.S. profile) outside the U.S. by their note's location, below "# done", then re-sorts the
+      queue from the fame levels in the notes. Nothing is downloaded and nothing is deleted.
+  python find_internships.py --folder "JOB_SEARCH_FOLDER" --sort
+      Sets every queued line's fame level ("| fame 1" to "| fame 4" in its note) and sorts the queue.
+
+Queue order (--append, --sort and --tidy all sort it): best-known companies first (fame 1: big tech, AI labs,
+top trading firms and household names; 2: 30+ U.S. listings on SimplifyJobs; 3: 8 to 29; 4: the rest), one
+line per company per round, newest first, and a company only as high as the batch's two-per-company limit
+(tracker rows from today and yesterday) leaves room for. Links added by hand without a note stay on top.
 
 Filters (all optional; without them, sensible defaults come from profile.json in the folder):
   --term "Summer 2027"        internship term (default: profile's internship term, else Summer 2027)
@@ -27,11 +38,14 @@ Filters (all optional; without them, sensible defaults come from profile.json in
   --append                    add the results to jobs.txt (above any "# done" line), one link per line with a note
   --include-abroad            keep listings outside the U.S. (a U.S. profile drops them: the user's call, 2026-11-08)
 
-Skips LinkedIn links (LinkedIn prohibits automated tools) and listings that are closed, already in tracker.xlsx (same company and role) or already in jobs.txt.
-Prints one JSON object. Exit codes: 0 ok, 1 bad input, 6 couldn't download the list (network).
+Skips LinkedIn links (LinkedIn prohibits automated tools) and listings that are closed, already in tracker.xlsx (same
+link, job ID, or company and role) or already in jobs.txt.
+Prints one JSON object. Exit codes: 0 ok, 1 bad input, 6 couldn't download any list (network). When only some lists
+download, the others still give results and `sources_failed` names the missing ones.
 """
 import argparse
 import datetime as dt
+import html
 import json
 import os
 import re
@@ -41,6 +55,14 @@ import urllib.request
 
 SOURCE = 'https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json'
 REPO = 'https://github.com/SimplifyJobs/Summer2027-Internships'
+# speedyapply's README is its U.S. internship list (INTERN_INTL.md holds the rest), in three tables: FAANG+, Quant
+# and Other. Each is software (SWE) or AI/ML (AI) only.
+SPEEDY = [
+    {'name': 'speedyapply SWE', 'repo': 'https://github.com/speedyapply/2027-SWE-College-Jobs', 'category': 'Software',
+     'url': 'https://raw.githubusercontent.com/speedyapply/2027-SWE-College-Jobs/main/README.md', 'cache': 'speedyapply-2027-swe.md'},
+    {'name': 'speedyapply AI', 'repo': 'https://github.com/speedyapply/2027-AI-College-Jobs', 'category': 'AI/ML/Data',
+     'url': 'https://raw.githubusercontent.com/speedyapply/2027-AI-College-Jobs/main/README.md', 'cache': 'speedyapply-2027-ai.md'},
+]
 CATEGORIES = {
     'software': {'Software', 'Software Engineering'},
     'data': {'AI/ML/Data', 'Data Science, AI & Machine Learning'},
@@ -81,6 +103,28 @@ def degree_level(text):
     if re.search(r'bachelor|\bb ?s\b|\bb ?a\b|\bb ?sc\b|\bb ?eng\b|undergrad', t):
         return "Bachelor's"
     return None
+
+
+def title_term_ok(title, term):
+    """For a listing with no term field: False when its title names another term ("Spring 2027 Co-op", "Fall
+    2026"). A graduation term in the title ("(Grad Year: Spring 2028)") isn't the internship's."""
+    t = re.sub(r'\(?\b(grad(uation)?|graduat\w*|class of)\b[^)]*\)?', ' ', str(title or '').lower())
+    season, year = term.lower().split()
+    named = set(re.findall(r'\b(summer|fall|autumn|winter|spring)\b', t))
+    if named and season not in named and not (season == 'fall' and 'autumn' in named):
+        return False
+    years = set(re.findall(r'\b(20\d{2})\b', t))
+    return not years or year in years
+
+
+GRAD_TITLE = re.compile(r'\b(ph\.?\s?d|doctoral|doctorate|master\'?s|mba)\b')
+UNDERGRAD_TITLE = re.compile(r'\b(bachelor\w*|undergrad\w*|bs|ba)\b')
+
+
+def title_rules_out(title, degree):
+    """For a listing with no degree field: True when the title asks for a graduate degree an undergraduate lacks."""
+    t = str(title or '').lower()
+    return degree in ("Bachelor's", "Associate's") and bool(GRAD_TITLE.search(t)) and not UNDERGRAD_TITLE.search(t)
 
 
 def load_profile(folder):
@@ -166,42 +210,57 @@ def outside_us(places):
     return None
 
 
-def tracker_keys(folder):
+def tracker_index(folder):
+    """Each tracker row under every key that can recognize its posting: the link, its job ID, and company + role.
+    By name alone, 54 tracker rows didn't match the same jobs on speedyapply, whose titles differ ("Software
+    Engineering Intern - iOS - Summer 2027" for "Software Engineering Intern - iOS")."""
     path = os.path.join(folder, 'tracker.xlsx')
-    keys = set()
+    tracked = {}
     if not os.path.exists(path):
-        return keys
-    try:
-        from openpyxl import load_workbook
-        ws = load_workbook(path, read_only=True).active
-        for i, row in enumerate(ws.iter_rows(values_only=True)):
-            if i == 0 or not row:
-                continue
-            keys.add((norm(row[2]), norm(row[3])))  # company, role
-    except Exception:
-        pass
-    return keys
+        return tracked
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import tracker  # prints its own error and exits when openpyxl is missing
+    tracker.lock_tracker(path)  # never read the workbook halfway through another call's save
+    _, ws, _ = tracker.open_book(path)
+    for row in tracker.rows(ws):
+        row = tracker.read_links(ws, row)
+        for k in posting_keys(row['posting_url'], row['company']) | {name_key(row['company'], row['role'])}:
+            if k:
+                tracked.setdefault(k, row)
+    return tracked
 
 
-def jobs_urls(path):
+def jobs_keys(path):
+    """posting_keys of every link in jobs.txt, queued or done, and its lines."""
     if not os.path.exists(path):
         return set(), []
     lines = open(path, encoding='utf-8').read().splitlines()
-    urls = {m.group(0).split('?')[0].rstrip('/') for l in lines for m in [re.search(r'https?://\S+', l)] if m}
-    return urls, lines
+    keys = set()
+    for l in lines:
+        m = re.search(r'https?://\S+', l)
+        if m:
+            rest = l[m.end():]
+            company = rest.split('#', 1)[1].split('|')[0].strip() if '#' in rest else None
+            keys |= posting_keys(m.group(0), company)
+    return keys, lines
 
 
 UUID = r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 # Query parameters that say where a click came from or how the page is shown, not which job it is
-TRACKING = re.compile(r'(utm_[a-z]+|gh_src|source|src|ref|referrer|lever-source|lever-origin|embed|in_iframe|mode|iis|iisn)$')
+TRACKING = re.compile(r'(utm_[a-z]+|gh_src|source|src|ref|referrer|lever-source|lever-origin|embed|in_iframe|mode|iis|iisn|'
+                      r'ats|icims|lang|locale|mobile|needsredirect)$')  # SimplifyJobs adds ?ats=successfactors, ?icims=1&lang=en-us
 
 
-def posting_keys(url):
+def posting_keys(url, company=None):
     """Every way to recognize one posting behind different links.
 
     The same job turns up as boards.greenhouse.io/x/jobs/1 and job-boards.greenhouse.io/x/jobs/1?gh_src=...,
     as a company page with ?gh_jid=1, as an Ashby link with and without /application?embed=true, or as a Workday
     link whose location part differs. Comparing whole links missed those, so each link also yields its job ID.
+    Lists disagree on links and titles too: speedyapply has amazon.jobs/jobs/10587999/apply where SimplifyJobs has
+    amazon.jobs/en/jobs/10587999/<slug>, and us-careers-rivian.icims.com/jobs/33801/job where SimplifyJobs has
+    careers.rivian.com/jobs/33801?icims=1, under a shorter title. iCIMS numbers its jobs per company, so its key
+    holds the site (or, given `company`, the company name).
     """
     m = re.match(r'https?://(?:www\.)?([^/?#\s]+)([^?#\s]*)(?:\?([^#\s]*))?', str(url or '').strip().lower())
     if not m:
@@ -227,6 +286,21 @@ def posting_keys(url):
         tenant = host.split('.')[0] if 'myworkdayjobs' in host else after
         if req:  # requisition numbers repeat across companies, so the tenant is part of the key
             keys.add(f'workday:{tenant}:{req.group(1)}')
+    if host.endswith('amazon.jobs'):
+        a = re.search(r'/jobs/(\d+)', path)
+        if a:
+            keys.add('amazon:' + a.group(1))
+    if host.endswith('smartrecruiters.com'):
+        s = re.search(r'^/[^/]+/(\d{6,})', path)  # /<Company>/<posting id>[-slug]
+        if s:
+            keys.add('smartrecruiters:' + s.group(1))
+    icims = host.endswith('icims.com') or host.endswith('jibeapply.com') or re.search(r'(?:^|&)icims=1', query)
+    j = re.search(r'/jobs/(\d+)', path) if icims else None
+    if j:
+        if host.endswith('icims.com'):
+            keys.add(f'icims:{host}:{j.group(1)}')
+        if norm(company):
+            keys.add(f'icims:{norm(company)}:{j.group(1)}')
     return keys
 
 
@@ -234,28 +308,168 @@ def name_key(company, role):
     return f'name:{norm(company)}|{norm(role)}' if norm(company) and norm(role) else None
 
 
+# ---- queue order: best-known companies first ----
+
+# Level 1: big tech, AI labs, top trading firms and household names. Seeded with every company SimplifyJobs (its
+# "FAANG+" mark) or speedyapply (its FAANG+ and Quant tables) marked on 2026-11-11, plus the ones those marks
+# miss (SimplifyJobs marks only companies with a row open that day, so Jane Street and Apple weren't marked).
+# speedyapply's tables add to it on every run. A name matches a company name that starts with it ("Citadel"
+# covers "Citadel Securities"; "The Walt Disney Company" is checked without "The").
+FAME_NAMES = [
+    'Adobe', 'Airbnb', 'Amazon', 'AMD', 'American Express', 'Anthropic', 'Apple', 'Atlassian', 'Belvedere Trading', 'Block',
+    'Bloomberg', 'ByteDance', 'Capital One', 'Cisco', 'Citadel', 'Cloudflare', 'Coinbase', 'CrowdStrike', 'D. E. Shaw',
+    'Databricks', 'Datadog', 'Dell Technologies', 'Discord', 'Disney', 'DoorDash', 'Dropbox', 'Duolingo', 'Epic Games', 'Figma',
+    'Five Rings', 'Goldman Sachs', 'Google', 'HP', 'Hudson River Trading', 'IBM', 'IMC', 'Instacart', 'Intel', 'Jane Street',
+    'JPMorgan', 'Jump Trading', 'LinkedIn', 'Lyft', 'Mastercard', 'Meta', 'Microsoft', 'Morgan Stanley', 'Netflix', 'Notion',
+    'NVIDIA', 'OpenAI', 'Optiver', 'Oracle', 'Palantir', 'PayPal', 'Pinterest', 'Plaid', 'Qualcomm', 'Ramp', 'Reddit',
+    'Riot Games', 'Rippling', 'Rivian', 'Robinhood', 'Roblox', 'Salesforce', 'Scale AI', 'Schonfeld', 'ServiceNow', 'Shopify',
+    'Snap', 'Snowflake', 'SpaceX', 'Spotify', 'Square', 'Stripe', 'Susquehanna', 'Tesla', 'TikTok', 'Tinder', 'Twitch',
+    'Two Sigma', 'Uber', 'Visa', 'Walmart', 'Walt Disney', 'Waymo', 'Zoom',
+]
+# Companies whose names start with a level-1 name but aren't that company
+FAME_NOT = {'apple bank'}
+FAME_TAG = re.compile(r'\s*\|\s*fame [1-4]\b')
+
+
+def bare_name(company):
+    words = norm(company).split()
+    return ' '.join(words[1:] if words[:1] == ['the'] else words)
+
+
+def fame_table(simplify, speedy):
+    """What fame_level() needs: the level-1 names, and each company's count of open-or-closed U.S. listings on
+    SimplifyJobs since its list started (a measure of how big an employer it is)."""
+    names = {bare_name(n) for n in FAME_NAMES} | {bare_name(x['company_name']) for x in speedy if x.get('faang') or x.get('quant')}
+    counts = {}
+    for x in simplify:
+        if outside_us(x.get('locations') or []) is not True:
+            c = norm(x.get('company_name'))
+            counts[c] = counts.get(c, 0) + 1
+    return names - {''}, counts
+
+
+def fame_level(company, table):
+    """1 best known (FAME_NAMES), 2 for 30+ U.S. listings, 3 for 8 to 29, 4 for the rest."""
+    names, counts = table
+    b = bare_name(company)
+    if not b:
+        return None
+    if not any(b == x or b.startswith(x + ' ') for x in FAME_NOT) and any(b == n or b.startswith(n + ' ') for n in names):
+        return 1
+    n = counts.get(norm(company), 0)
+    return 2 if n >= 30 else 3 if n >= 8 else 4
+
+
+def queue_line(line):
+    """(company, posted 'YYYY-MM-DD' or '', fame level or None) for a queued line with a note, else None."""
+    m = re.search(r'https?://\S+', line)
+    rest = line[m.end():] if m else ''
+    if not m or '#' not in rest:
+        return None
+    note = rest.split('#', 1)[1]
+    parts = [p.strip() for p in note.split('|')]
+    posted = next((re.search(r'\d{4}-\d{2}-\d{2}', p).group(0) for p in parts if re.match(r'posted \d{4}-\d{2}-\d{2}', p)), '')
+    tag = re.search(r'\|\s*fame ([1-4])\b', note)
+    return parts[0], posted, int(tag.group(1)) if tag else None
+
+
+def with_fame(line, level):
+    """The line with its note's fame tag set to `level`."""
+    return FAME_TAG.sub('', line).rstrip() + f' | fame {level}' if level and queue_line(line) else line
+
+
+def retag(line, table):
+    """The line with its fame level worked out again. Without SimplifyJobs' counts (its download failed), levels
+    2 to 4 can't be told apart, so a line keeps the tag it has unless it's level 1."""
+    q = queue_line(line)
+    if not q:
+        return line
+    level = fame_level(q[0], table)
+    if not table[1] and level != 1 and q[2]:
+        return line
+    return with_fame(line, level)
+
+
+def recent_counts(tracked):
+    """Tracker rows per company added today or yesterday, Skipped ones left out (batch.md's two-per-company limit)."""
+    today = dt.date.today()
+    counts = {}
+    for row in {id(r): r for r in tracked.values()}.values():
+        m = re.search(r'(\d{4})-(\d{2})-(\d{2})', str(row.get('date_added') or ''))
+        if not m or str(row.get('status') or '').strip().lower() == 'skipped':
+            continue
+        if (today - dt.date(*map(int, m.groups()))).days <= 1:
+            c = norm(row.get('company'))
+            counts[c] = counts.get(c, 0) + 1
+    return counts
+
+
+def sort_queue(lines, recent):
+    """jobs.txt's lines with the queue (above '# done') in the order batches should take it.
+
+    Lines without a note (links the user added by hand) and lines without a link stay on top as they were. The
+    rest go by fame level, one line per company per round within a level, newest first within a company. A batch
+    takes at most two postings per company, counting the company's tracker rows from today and yesterday, so a
+    company only keeps as many places at the top as that limit leaves; its other lines follow every company's
+    first ones. Without that, a batch fetching the top of the queue got lines it then had to hold (simulated:
+    a third batch of six picked nothing). Ties go by link, so sorting twice changes nothing.
+    """
+    done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
+    top, items = [], []
+    for line in lines[:done_at]:
+        q = queue_line(line)
+        if q:
+            items.append({'line': line, 'company': norm(q[0]), 'posted': q[1], 'level': q[2] or 4,
+                          'url': re.search(r'https?://\S+', line).group(0)})
+        elif line.strip():
+            top.append(line)
+    ranked = []
+    for level in sorted({i['level'] for i in items}):
+        groups = {}
+        for i in sorted((i for i in items if i['level'] == level), key=lambda i: i['url']):
+            groups.setdefault(i['company'] or i['url'], []).append(i)
+        for g in groups.values():
+            g.sort(key=lambda i: i['posted'], reverse=True)  # stable: equal dates keep link order
+        order = sorted(sorted(groups), key=lambda k: groups[k][0]['posted'], reverse=True)
+        for r in range(max((len(g) for g in groups.values()), default=0)):
+            ranked += [groups[k][r] for k in order if len(groups[k]) > r]
+    first, rest, seen = [], [], {}
+    for i in ranked:
+        k = i['company'] or i['url']
+        (first if seen.get(k, 0) < max(0, 2 - recent.get(i['company'], 0)) else rest).append(i)
+        seen[k] = seen.get(k, 0) + 1
+    queue = top + [i['line'] for i in first + rest]
+    return queue + (['', '# done'] + lines[done_at + 1:] if done_at < len(lines) else [])
+
+
+def write_lines(path, lines):
+    with open(path, 'w', encoding='utf-8') as f:  # rewrites jobs.txt in place; nothing is deleted
+        f.write('\n'.join(lines) + '\n')
+
+
+def sort_summary(lines):
+    done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
+    queued = [queue_line(l) for l in lines[:done_at]]
+    levels = {}
+    for q in queued:
+        if q:
+            levels[f'fame {q[2]}' if q[2] else 'no tag'] = levels.get(f'fame {q[2]}' if q[2] else 'no tag', 0) + 1
+    top = [re.sub(r'\s+', ' ', l.split('#', 1)[1])[:90] for l in lines[:done_at] if queue_line(l)][:8]
+    return {'queued_by_fame': dict(sorted(levels.items())), 'top_of_queue': top}
+
+
 def tidy(folder):
     """Move links already in the tracker, or listed twice, below jobs.txt's '# done' line.
 
     The top of the queue goes stale when a run forgets to move what it processed, and each batch then re-checked
     every pick against tracker.xlsx with one-off scripts. Matching uses the link, its job ID, and the company and
-    role from the line's note (any status counts, Skipped included). Lines are moved, never deleted.
+    role from the line's note (any status counts, Skipped included). Lines are moved, never deleted. Then the
+    queue is sorted (sort_queue) from the fame tags already in the notes.
     """
     jobs_path = os.path.join(folder, 'jobs.txt')
-    tracker_path = os.path.join(folder, 'tracker.xlsx')
     if not os.path.exists(jobs_path):
         out({'ok': False, 'error': f'no jobs.txt in {folder}'}, 1)
-    tracked = {}
-    if os.path.exists(tracker_path):
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import tracker  # prints its own error and exits when openpyxl is missing
-        tracker.lock_tracker(tracker_path)  # never read the workbook halfway through another call's save
-        _, ws, _ = tracker.open_book(tracker_path)
-        for row in tracker.rows(ws):
-            row = tracker.read_links(ws, row)
-            for k in posting_keys(row['posting_url']) | {name_key(row['company'], row['role'])}:
-                if k:
-                    tracked.setdefault(k, row)
+    tracked = tracker_index(folder)
 
     lines = open(jobs_path, encoding='utf-8').read().splitlines()
     done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
@@ -269,7 +483,7 @@ def tidy(folder):
         rest = line[m.end():]
         note = rest.split('#', 1)[1].strip() if '#' in rest else ''
         parts = [p.strip() for p in note.split('|')]
-        links = posting_keys(m.group(0))
+        links = posting_keys(m.group(0), parts[0] if note else None)
         # The same title at the same company counts as applied (the tracker row), but two queued lines count as
         # duplicates only by link or job ID: one title is often posted separately per city (Chicago, London).
         named = {name_key(parts[0], parts[1])} - {None} if len(parts) > 1 else set()
@@ -284,14 +498,17 @@ def tidy(folder):
             keep.append(line)
         seen |= links
 
+    merged = lines
     if moved:
         while keep and not keep[-1].strip():
             keep.pop()
         merged = keep + ['', '# done'] + [l for l, _, _ in moved] + lines[done_at + 1:]
-        with open(jobs_path, 'w', encoding='utf-8') as f:  # rewrites jobs.txt in place; nothing is deleted
-            f.write('\n'.join(merged) + '\n')
+    # Re-sort from the fame tags the notes already carry, so this needs no download; untagged lines count as 4.
+    merged = sort_queue(merged, recent_counts(tracked))
+    if merged != lines:
+        write_lines(jobs_path, merged)
     shown = [f'{n[:80]} ({why})' for _, n, why in moved[:10]]
-    return {'ok': True, 'moved_below_done': len(moved),
+    return {'ok': True, **sort_summary(merged), 'moved_below_done': len(moved),
             'in_tracker': sum(1 for *_, why in moved if why.startswith('in tracker')),
             'listed_twice': sum(1 for *_, why in moved if why == 'listed twice'),
             'not_in_us': sum(1 for *_, why in moved if why == 'not in the U.S.'),
@@ -299,19 +516,74 @@ def tidy(folder):
             'moved': shown + ([f'... {len(moved) - 10} more'] if len(moved) > 10 else [])}
 
 
+def download(url, cache_name):
+    """The file's bytes, from a copy in the temp folder when it's under 3 hours old."""
+    cache = os.path.join(tempfile.gettempdir(), cache_name)
+    if os.path.exists(cache) and (dt.datetime.now().timestamp() - os.path.getmtime(cache)) < 3 * 3600:
+        return open(cache, 'rb').read()
+    req = urllib.request.Request(url, headers={'User-Agent': 'internship-application-skill'})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        data = r.read()
+    open(cache, 'wb').write(data)  # temp folder only
+    return data
+
+
 def fetch():
-    cache = os.path.join(tempfile.gettempdir(), 'simplify-summer2027-listings.json')
+    """(SimplifyJobs listings, speedyapply rows, the lists that failed). Exits only when every list failed."""
+    failed, simplify, speedy = [], [], []
     try:
-        if os.path.exists(cache) and (dt.datetime.now().timestamp() - os.path.getmtime(cache)) < 3 * 3600:
-            return json.load(open(cache, encoding='utf-8'))
-        req = urllib.request.Request(SOURCE, headers={'User-Agent': 'internship-application-skill'})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            data = r.read()
-        open(cache, 'wb').write(data)  # temp folder only
-        return json.loads(data)
+        simplify = json.loads(download(SOURCE, 'simplify-summer2027-listings.json'))
     except Exception as e:
-        out({'ok': False, 'code': 'NETWORK', 'error': f'Could not download the SimplifyJobs list: {e}',
+        failed.append({'source': REPO, 'error': str(e)})
+    for src in SPEEDY:
+        try:
+            rows = speedy_rows(download(src['url'], src['cache']).decode('utf-8', 'replace'), src)
+            if not rows:
+                raise ValueError('no table rows found (the page layout may have changed)')
+            speedy += rows
+        except Exception as e:
+            failed.append({'source': src['repo'], 'error': str(e)})
+    if not simplify and not speedy:
+        out({'ok': False, 'code': 'NETWORK', 'error': 'Could not download any job list: ' + '; '.join(f"{f['source']}: {f['error']}" for f in failed),
              'hint': f'Allow raw.githubusercontent.com in network settings, or open {REPO} in the browser and read the table there.'}, 6)
+    return simplify, speedy, failed
+
+
+TABLE = re.compile(r'<!-- TABLE_(?:(FAANG|QUANT)_)?START -->(.*?)<!-- TABLE_(?:FAANG_|QUANT_)?END -->', re.S)
+
+
+def cell_text(c):
+    return html.unescape(re.sub(r'<[^>]+>', '', c)).strip()
+
+
+def speedy_rows(md, src):
+    """speedyapply's tables as listings shaped like SimplifyJobs' (fields it lacks stay empty). Columns come from each
+    table's header row: FAANG+ and Quant tables have a Salary column, Other doesn't. "Age" is days since posting."""
+    now = dt.datetime.now().timestamp()
+    rows = []
+    for table, body in TABLE.findall(md):
+        header = None
+        for line in body.splitlines():
+            if not line.startswith('|') or re.match(r'\|\s*-{3}', line):
+                continue
+            cells = [c.strip() for c in line.strip().strip('|').split(' | ')]
+            if header is None:
+                header = [norm(c) for c in cells]
+                continue
+            if len(cells) != len(header):
+                continue
+            c = dict(zip(header, cells))
+            link = re.search(r'href="([^"]+)"', c.get('posting', ''))
+            age = re.match(r'(\d+)\s*d', c.get('age', ''))
+            if not link or not cell_text(c.get('company', '')):
+                continue
+            place = re.sub(r'\s*\+\d+$', '', cell_text(c.get('location', '')))  # "Palo Alto, CA +1": one more city not shown
+            rows.append({'company_name': cell_text(c['company']), 'title': cell_text(c.get('position', '')),
+                         'locations': [place] if place else [], 'url': html.unescape(link.group(1)), 'active': True,
+                         'terms': None, 'category': src['category'], 'quant': table == 'QUANT', 'faang': table == 'FAANG',
+                         'degrees': [], 'sponsorship': '', 'source': src['name'],
+                         'date_posted': now - int(age.group(1)) * 86400 if age else None})
+    return rows
 
 
 def main():
@@ -329,12 +601,27 @@ def main():
     ap.add_argument('--limit', type=int, default=25)
     ap.add_argument('--append', action='store_true')
     ap.add_argument('--include-abroad', action='store_true', help='keep listings outside the U.S. (dropped by default for a U.S. profile)')
-    ap.add_argument('--tidy', action='store_true', help='only move queued links already in the tracker below "# done"')
+    ap.add_argument('--tidy', action='store_true', help='only move queued links already in the tracker below "# done", and re-sort the queue')
+    ap.add_argument('--sort', action='store_true', help='only set every queued line\'s fame level and sort the queue')
     a = ap.parse_args()
 
     folder = os.path.abspath(a.folder)
     if a.tidy:
         out(tidy(folder))
+    if a.sort:
+        jobs_path = os.path.join(folder, 'jobs.txt')
+        if not os.path.exists(jobs_path):
+            out({'ok': False, 'error': f'no jobs.txt in {folder}'}, 1)
+        simplify, speedy, failed = fetch()
+        table = fame_table(simplify, speedy)
+        tracked = tracker_index(folder)  # after the downloads (it holds the tracker's lock until exit)
+        lines = open(jobs_path, encoding='utf-8').read().splitlines()
+        done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
+        tagged = [retag(l, table) for l in lines[:done_at]] + lines[done_at:]
+        merged = sort_queue(tagged, recent_counts(tracked))
+        if merged != lines:
+            write_lines(jobs_path, merged)
+        out({'ok': True, **sort_summary(merged), 'sources_failed': failed})
     profile = load_profile(folder)
     defaults_used = {}
 
@@ -367,11 +654,36 @@ def main():
             out({'ok': False, 'error': f'unknown category: {c}', 'categories': ['software', 'data', 'hardware', 'product', 'quant']}, 1)
         cats |= CATEGORIES[key]
 
-    data = fetch()
+    simplify, speedy, failed = fetch()
+    # A job on both lists is taken from SimplifyJobs. A closed SimplifyJobs entry matches only by link or job ID:
+    # by company and title, an old closed posting would hide this year's open one.
+    all_links, open_links, open_names = set(), set(), set()
+    for x in simplify:
+        keys = posting_keys(x.get('url'), x.get('company_name'))
+        all_links |= keys
+        if x.get('active') and x.get('is_visible', True):
+            open_links |= keys
+            open_names.add(name_key(x.get('company_name'), x.get('title')))
+    extra, seen_speedy = [], set()
+    counted = {'rows': len(speedy), 'on_simplifyjobs': 0, 'closed_on_simplifyjobs': 0, 'on_both_speedyapply_lists': 0}
+    for x in speedy:
+        keys = posting_keys(x['url'], x['company_name'])
+        named = {name_key(x['company_name'], x['title'])} - {None}
+        if keys & open_links or named & open_names:
+            counted['on_simplifyjobs'] += 1
+        elif keys & all_links:
+            counted['closed_on_simplifyjobs'] += 1
+        elif (keys | named) & seen_speedy:
+            counted['on_both_speedyapply_lists'] += 1
+        else:
+            extra.append(x)
+        seen_speedy |= keys | named
+    counted['added_by_speedyapply'] = len(extra)
+
     cutoff = (dt.datetime.now() - dt.timedelta(days=a.days)).timestamp() if a.days else None
-    tracked = tracker_keys(folder)
+    tracked = tracker_index(folder)  # after the downloads: it holds the tracker's lock until this process exits
     jobs_path = os.path.join(folder, 'jobs.txt')
-    queued, lines = jobs_urls(jobs_path)
+    queued, lines = jobs_keys(jobs_path)
     kw = [norm(k) for k in a.keyword]
     ex = [norm(k) for k in a.exclude_keyword]
 
@@ -379,14 +691,14 @@ def main():
                'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0}
     us_only = home_is_us(profile) and not a.include_abroad
     results = []
-    for x in data:
+    for x in simplify + extra:
         if 'linkedin.com' in (x.get('url') or '').lower():  # never queue LinkedIn; apply on the company's site
             skipped['linkedin_link'] += 1; continue
         if not x.get('active') or not x.get('is_visible', True):
             skipped['closed'] += 1; continue
-        if term not in (x.get('terms') or []):
+        if not (term in x['terms'] if x.get('terms') is not None else title_term_ok(x.get('title'), term)):
             skipped['term'] += 1; continue
-        if cats and x.get('category') not in cats:
+        if cats and not ({x.get('category')} | ({'Quant'} if x.get('quant') else set())) & cats:
             skipped['category'] += 1; continue
         if not location_match(x.get('locations') or [], a.location):
             skipped['location'] += 1; continue
@@ -396,7 +708,7 @@ def main():
         if (kw and not any(k in title for k in kw)) or any(k in title for k in ex):
             skipped['keyword'] += 1; continue
         degrees = x.get('degrees') or []
-        if degree and degrees and degree not in degrees:
+        if (degree and degrees and degree not in degrees) or (not degrees and title_rules_out(x.get('title'), degree)):
             skipped['degree'] += 1; continue
         sp = x.get('sponsorship', '')
         if (drop_no_sponsor and sp == 'Does Not Offer Sponsorship') or \
@@ -404,9 +716,10 @@ def main():
             skipped['sponsorship'] += 1; continue
         if cutoff and (x.get('date_posted') or 0) < cutoff:
             skipped['too_old'] += 1; continue
-        if (norm(x.get('company_name')), title) in tracked:
+        keys = posting_keys(x.get('url'), x.get('company_name'))
+        if (keys | {name_key(x.get('company_name'), x.get('title'))}) & tracked.keys():
             skipped['already_tracked'] += 1; continue
-        if x.get('url', '').split('?')[0].rstrip('/') in queued:
+        if keys & queued:
             skipped['already_in_jobs_txt'] += 1; continue
         results.append(x)
 
@@ -425,10 +738,10 @@ def main():
         'company': x['company_name'], 'role': x['title'], 'locations': x.get('locations', []),
         'posted': dt.date.fromtimestamp(x['date_posted']).isoformat() if x.get('date_posted') else '',
         'category': x.get('category'), 'degrees': x.get('degrees', []), 'sponsorship': x.get('sponsorship'),
-        'url': x.get('url'),
+        'url': x.get('url'), 'source': x['source'] if str(x.get('source') or '').startswith('speedyapply') else 'SimplifyJobs',
     } for x in results]
 
-    added = 0
+    added, order = 0, {}
     if a.append and listings:
         new_lines = [f"{l['url']}  # {l['company']} | {l['role']} | {', '.join(l['locations'][:3])} | posted {l['posted']}"
                      for l in listings]
@@ -436,16 +749,20 @@ def main():
         pending, rest = lines[:done_at], lines[done_at:]
         while pending and not pending[-1].strip():
             pending.pop()
-        merged = pending + new_lines + ([''] if rest else []) + rest
-        with open(jobs_path, 'w', encoding='utf-8') as f:  # rewrites jobs.txt in place; nothing is deleted
-            f.write('\n'.join(merged) + '\n')
-        added = len(new_lines)
+        # Every queued line gets its fame level again (the lists change daily), then the whole queue is sorted.
+        table = fame_table(simplify, speedy)
+        pending = [retag(l, table) for l in pending + new_lines]
+        merged = sort_queue(pending + ([''] if rest else []) + rest, recent_counts(tracked))
+        write_lines(jobs_path, merged)
+        added, order = len(new_lines), sort_summary(merged)
 
-    out({'ok': True, 'source': REPO, 'term': term, 'filters': {
+    down = {f['source'] for f in failed}
+    out({'ok': True, 'sources': [r for r in [REPO] + [s['repo'] for s in SPEEDY] if r not in down], 'sources_failed': failed,
+         'speedyapply': counted, 'term': term, 'filters': {
         'categories': a.category, 'locations': a.location, 'keywords': a.keyword, 'exclude_keywords': a.exclude_keyword,
         'degree': degree, 'drop_no_sponsorship_postings': drop_no_sponsor,
         'drop_citizenship_required': drop_citizenship, 'below_senior': below, 'days': a.days}, 'defaults_from_profile': defaults_used,
-        'matches': total_matches, 'shown': len(listings), 'added_to_jobs_txt': added, 'skipped': skipped, 'listings': listings})
+        'matches': total_matches, 'shown': len(listings), 'added_to_jobs_txt': added, **order, 'skipped': skipped, 'listings': listings})
 
 
 if __name__ == '__main__':
