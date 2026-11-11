@@ -100,11 +100,13 @@
   // Two sponsorship answers, because many students need none for the internship itself (on CPT, for
   // example) but will need it for a full-time job later:
   //   a question that includes the future ("now or in the future")  → needsSponsorship
-  //   a question only about this internship or role                 → needsSponsorshipForInternship
+  //   a question only about this internship or role, or "now"       → needsSponsorshipForInternship
   //   a question that could mean either                             → only when the two answers agree
   // Anything else is left for you. A wrong answer here can get an offer withdrawn, so when unsure, leave it.
   const SPONSOR_LATER = /\bfuture\b|\bnow or later\b|\bat any (point|time)\b|\bever\b|\bupon graduation\b|\bafter (you )?graduat\w*|\bfull[- ]time\b|\bh-?1-?b\b/;
   const SPONSOR_THIS_ROLE = /\b(this|the) (internship|co-?op|role|position|job|opportunity)\b|\bduring (the|this|your) internship\b/;
+  // "Do you require visa sponsorship now?" without the future is about the internship too.
+  const SPONSOR_NOW = /\bnow\b/;
   // Examples in parentheses aren't the question. DoorDash asks "Will you now require immigration sponsorship
   // ... (e.g., H-1B, E-3, TN, O-1, STEM OPT, or any immigration work authorization ...)" and, separately,
   // "Will you in the future require ...". With the examples, the label was too long for the rule below to
@@ -117,7 +119,7 @@
     const later = yn(p.needsSponsorship);
     const now = yn(p.needsSponsorshipForInternship);
     if (SPONSOR_LATER.test(label)) return later;
-    if (now && (now === later || SPONSOR_THIS_ROLE.test(label))) return now;
+    if (now && (now === later || SPONSOR_THIS_ROLE.test(label) || SPONSOR_NOW.test(label))) return now;
     // Never needing sponsorship covers this role too.
     return later === 'no' && now !== 'yes' ? 'no' : null;
   }
@@ -524,9 +526,18 @@
     return best;
   }
 
+  // A sponsorship question about this internship only takes the internship answer even when a saved answer also
+  // matches: Cyvl's "Would you need Cyvl to sponsor a visa for this internship?" got Yes from a saved answer to a
+  // general sponsorship question, against the profile's No for the internship. The user chose the profile field.
+  function internshipSponsorQuestion(p, label) {
+    const q = noExamples(label);
+    return /\bsponsor\w*/.test(q) && !!yn(p.needsSponsorshipForInternship) && !SPONSOR_LATER.test(q)
+      && (SPONSOR_THIS_ROLE.test(q) || SPONSOR_NOW.test(q));
+  }
+
   function resolve(p, label, hints, el, kind, counters) {
-    // 1. Your saved answers come first.
-    const saved = savedAnswer(p, label);
+    // 1. Your saved answers come first, except on a sponsorship question about this internship only.
+    const saved = internshipSponsorQuestion(p, label) ? null : savedAnswer(p, label);
     if (saved) {
       const lead = saved.toLowerCase().match(/^(yes|no)\b/);
       return { value: saved, yesno: yn(saved.toLowerCase()), lead: lead && lead[1], rule: null };
