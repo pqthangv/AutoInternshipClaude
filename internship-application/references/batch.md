@@ -11,14 +11,14 @@ Use the subagent tool (Task or Agent, type `general-purpose`). Without one, foll
 
 1. **Tidy, fetch and screen the queue**, one call each (SKILL.md, "Batch runs"). Skip postings the tracker already has. Never start a subagent for a posting the screen marks `skip`: the fetch has moved it below `# done` with its reason (for links the user gave instead of jobs.txt, log it as `Skipped`). For a `check`, decide from its `screen_why` lines by SKILL.md step 2, here, and log a skip as `Skipped` with the reason. When too few are left, fetch again with a larger `--limit`. Order the rest by deadline, soonest first, then those with no deadline, newest first.
 
-   **At most two per company.** For each company, count its postings in this batch plus its tracker rows from the last 5 days (`in_tracker`, by `date_added`; Skipped rows don't count). Keep at most two: the titles that fit the user best (major, skills, the kind of role they asked for), the earlier deadline on a tie. For a posting the fetch couldn't read, take the company from its jobs.txt note or link. Leave the rest in jobs.txt above `# done`, adding `held: 2 per company` to the line's note if it isn't there yet. If the user asks for more from one company ("all the Northwind roles"), use their number.
+   **At most two per company.** For each company, count its postings in this batch plus its tracker rows added today or yesterday (`in_tracker`, by `date_added`; Skipped rows don't count). Keep at most two: the titles that fit the user best (major, skills, the kind of role they asked for), the earlier deadline on a tie. For a posting the fetch couldn't read, take the company from its jobs.txt note or link. Leave the rest in jobs.txt above `# done`, adding `held: 2 per company` to the line's note if it isn't there yet. If the user asks for more from one company ("all the Northwind roles"), use their number.
 2. **Tailor**: one subagent per posting with the tailoring prompt. Start the first one alone and all the rest in your next message (all in one message if your subagent tool waits for each to finish). Postings the fetch couldn't get are read in the browser, so follow "Sharing the browser" for those. Don't read tailoring.md, overleaf.md or the master yourself.
 3. **Checkpoint** (step 4) from the summaries, one short block per posting. Read a drafts file only to show its answers, and not at all in auto mode. Add one line for postings held by the company limit (company: roles), so the user can swap one in or say to do them all; in auto mode they stay held.
 4. **Fill**: one subagent per application with the filling prompt, all at once, following "Sharing the browser". Start the first one alone, then every other one not queued behind a sign-in in your next message (as in step 2), and each queued one when the form ahead of it replies (or in the next message, if your subagent tool waits for all). If they reply NO BROWSER, fill them all yourself, as in "Without subagents".
-5. **Hand-off**: one message for the whole batch: one line per tab (company and role, and what's needed: "sign in to Workday", "attach C:\\...\\Maya_Chen_Resume_Northwind.pdf"), then the questions from every form, grouped so one answer covers every form that asks it. Before sending, check each question against profile.json yourself (every field and `savedAnswers`, by meaning); send the ones it answers straight back to their subagents (step 6) instead of asking. In Submit mode without auto, also show the written answers the subagents drafted on the form (each record's "Written answers"); send this message even when nothing else needs the user, and wait.
-6. **Continue**: when the user is done, run the filling prompt again for each application, all at once as in step 4, with what the user did and their answers. Each continues from its application-record.md in the same tab. Repeat once if new steps came up.
+5. **Hand-off**: one message for the whole batch: one line per tab (company and role, and what's needed: "sign in to Workday", "attach C:\\...\\Maya_Chen_Resume_Northwind.pdf"), then the questions from every form, grouped so one answer covers every form that asks it. Before sending, check each question against profile.json yourself (every field and `savedAnswers`, by meaning); send the ones it answers straight back to their subagents (step 6) instead of asking. Sponsorship follows filling.md's "Sponsorship" line: a question about this internship only takes `needsSponsorshipForInternship` when it's set, over any saved answer. In Submit mode without auto, also show the written answers the subagents drafted on the form (each record's "Written answers"); send this message even when nothing else needs the user, and wait.
+6. **Continue**: when the user is done, run the filling prompt again for each application, all at once as in step 4, with what the user did and their answers. Each continues from its application-record.md in the same tab. Repeat once if new steps came up. When the user changes a rule for the batch ("you can click Save and Continue on Self Identify"), write it into each new filling prompt as a line after `Mode:` ("The user said: ..."); never pass it to a running subagent in a message. Never send a subagent back from Workday's review page to change work entries (filling.md, "Filling the form"); put what's wrong in the report.
 7. **Submit** (Submit mode only): do it yourself, never in a subagent. For each application whose check passed (or failed only on check 3, written answers, which the user has since seen and accepted), switch to its tab, confirm it's on the review page, and follow "Submitting" in submitting.md.
-8. **Report** once, one line per posting (step 8). Move processed links in jobs.txt below `# done`, editing in place. Held postings get one line together at the end ("Held, 2 per company: ...") and stay above `# done`. Postings the screen skipped get one line too ("Skipped by the screen: Company Role (reason), ..."). Save the answers listed under `To save:` to profile.json without asking (`references/profile.md`) and say in one line what you saved. If profile.json changed in this batch, or any reply's `Extension answers:` is lower than its number of `savedAnswers`, add: "In the AutoInternship extension, open the profile page, click **Restore from backup** and choose <folder>/profile.json, so the Fill button uses the new answers." End with one line telling the user to start a new conversation for the next batch.
+8. **Report** once, one line per posting (step 8); for one the site sent early, say what wasn't filled. Move processed links in jobs.txt below `# done`, editing in place. Held postings get one line together at the end ("Held, 2 per company: ...") and stay above `# done`. Postings the screen skipped get one line too ("Skipped by the screen: Company Role (reason), ..."). Save the answers listed under `To save:` to profile.json without asking (`references/profile.md`) and say in one line what you saved. If profile.json changed in this batch, or any reply's `Extension answers:` is lower than its number of `savedAnswers`, add: "In the AutoInternship extension, open the profile page, click **Restore from backup** and choose <folder>/profile.json, so the Fill button uses the new answers." End with one line telling the user to start a new conversation for the next batch.
 
 A posting with a wall the user can't clear in the hand-off (a broken page, a closed posting, an assessment) is `Needs you`; move on.
 
@@ -71,15 +71,21 @@ Read <skill>/references/filling.md (and references/submitting.md unless the mode
 file-reading tool, not cat. Read each file once. You don't need SKILL.md.
 Mode: <Review | Fill all | Submit>. Never click Submit in any mode: in Submit mode, fill as in Fill all,
 then run "The check before Submit" from submitting.md on the review page and report the result.
-iCIMS has no review page, and every step button says Submit. It only saves the step, except on the last
-step still to do: the current step once every other one is completed (a green check on its circle;
-"(Completed Step)" in the page text), whatever its number. That step's heading counts its forms
+iCIMS has no review page, and every step button says Submit. Click it on each step except the last step
+still to do: the current step once every other one is completed (a green check on its circle;
+"(Completed Step)" in the page text), whatever its number. Some forms send the whole application from an
+earlier step: never tell the user a step button only saves, in Submit mode check the step first, and after
+each click, if the page says the application was submitted, stop and reply with Status: sent early by the
+site (filling.md, "iCIMS has no review page"). That step's heading counts its forms
 ("Portal Specific Forms (1/3)"): click Submit on each form before the final one, then fill the final one
 (3/3) and stop without clicking Submit. With no count, treat the form on screen as the final one.
 In Review mode, stop when that last step opens.
 Don't leave the step that takes the resume until it shows the tailored PDF's file name; if you can't attach
 it there (on iCIMS, Replace Resume shows the file box), stop on that step and hand it over.
 Attach or paste the cover letter wherever the form takes one, optional fields included (filling.md, "Cover letter").
+Leave optional opt-ins (marketing or survey emails, talent communities, texts about other jobs) as they are.
+On Workday, fix the parsed work entries on My Experience before its Save and Continue; never go back from the
+review page to change them.
 The user <saw | didn't see (auto)> the drafted answers.
 For this application only: fill the form in the user's browser up to the review page or the first thing
 that needs the user, add each page's fields to application-record.md as you go, and log the tracker row
@@ -102,7 +108,7 @@ and never switch to, close or use any other tab. If your tab is gone but the gro
 tab and continue from application-record.md. If the group itself is gone ("This session's tab group no longer
 exists"), don't make a new one: stop and reply with Status: stopped: tab group lost.
 Reply with only these lines:
-Status: review page | needs the user | stopped: tab group lost | stopped: <why>
+Status: review page | needs the user | sent early by the site: <what wasn't filled> | stopped: tab group lost | stopped: <why>
 Tab: <id> <url>
 For the user: <one line, or none>
 Questions: <each question word for word, with its choices, or none>

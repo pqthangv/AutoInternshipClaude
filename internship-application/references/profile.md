@@ -40,7 +40,7 @@ Only when the folder has no profile.json:
   - `education`: `{ "school", "degree", "field", "minor", "start", "end", "gpa" }`, GPA exactly as written.
   - `work`: `{ "title", "company", "location", "start", "end", "highlights" }`, one highlight per line.
   - `projects`: `{ "name", "tools", "link", "highlights" }`
-  - `savedAnswers`: `{ "match", "answer" }`. A question containing `match` (a short lowercase phrase) gets the answer.
+  - `savedAnswers`: `{ "match", "answer" }`. A question containing `match` (a short lowercase phrase) as whole words gets the answer. Only the question sentence counts, not a statement before it; the longest matching phrase wins.
 
 ## Saving answers for next time
 

@@ -13,9 +13,10 @@ often answer 410), Amazon, TikTok and ByteDance pages, and any page with a schem
 Eightfold, Paylocity). Anything else, or a lookup that fails, is reported so that posting can be opened in the
 browser as before. LinkedIn is never read.
 
---profile screens each posting against the user's status and degree before anyone tailors for it: "skip" when
-it plainly rules the user out (excludes F-1 students, no CPT or OPT, permanent work authorization, citizenship,
-U.S. person status or a clearance the user can't have, a graduate-only role for an undergraduate), "check" for
+--profile screens each posting against the user's status, degree and availableFrom before anyone tailors for it:
+"skip" when it plainly rules the user out (excludes F-1 students or temporary visas, no CPT or OPT, permanent work
+authorization, citizenship, U.S. person status or a clearance the user can't have, a graduate-only role for an
+undergraduate, a set start date before availableFrom), "check" for
 wording a person should judge, else "ok", with the sentences behind it. Sponsorship alone never skips: below
 senior year it doesn't stop an application (SKILL.md step 2). --move-skips (with --jobs) moves skipped lines
 below "# done" with the reason, so no batch picks them again. Batch 2026-11-08 spent $2.41 of $17.76 on four
@@ -660,11 +661,15 @@ CLEARANCE = re.compile(r'\b(security|secret|top secret|ts\s?/\s?sci|dod|governme
 NO_CLEARANCE = re.compile(r'\bclearance\b[^.]{0,40}:\s*none\b|\bnone required\b')
 MAYBE = re.compile(r'\b(prefer\w*|a plus|desir\w*|nice to have|bonus|ideal\w*)\b')
 VISA = re.compile(r'\b(f-?1|j-?1)\b')
+# F-1 and J-1 are temporary (nonimmigrant) visas: "Individuals with temporary visas or who need sponsorship now or
+# in the future are not eligible for hire" (DriveTime) turns away an F-1 student without naming F-1.
+TEMP_VISA = re.compile(r'\b(temporary|nonimmigrant|non-immigrant) (work )?visas?\b')
 VISA_BAR = [
-    re.compile(r'\b(not|in)\s?eligible\b[^.]{0,60}\b(f-?1|j-?1|student visas?|international students?|visa holders?)\b'),
+    re.compile(r'\b(not|in)\s?eligible\b[^.]{0,60}\b(f-?1|j-?1|student visas?|international students?|visa holders?|(temporary|nonimmigrant|non-immigrant) visas?)\b'),
     re.compile(r'\b(f-?1|j-?1)\b[^.]{0,160}\b(not eligible|ineligible|are not|cannot|will not|won\'t|not be considered)\b'),
-    re.compile(r'\bnot (open|available)\b[^.]{0,40}\b(f-?1|j-?1|student visas?|international students?|visa holders?)\b'),
-    re.compile(r'\b(not|cannot|unable to|won\'t|will not)\b[^.]{0,20}\b(hire|interview|employ|consider|accept)\b[^.]{0,80}\b(f-?1|j-?1)\b'),
+    re.compile(r'\b(temporary|nonimmigrant|non-immigrant) (work )?visas?\b[^.]{0,160}\b(not eligible|ineligible|not be considered)\b'),
+    re.compile(r'\bnot (open|available)\b[^.]{0,40}\b(f-?1|j-?1|student visas?|international students?|visa holders?|(temporary|nonimmigrant|non-immigrant) visas?)\b'),
+    re.compile(r'\b(not|cannot|unable to|won\'t|will not)\b[^.]{0,20}\b(hire|interview|employ|consider|accept)\b[^.]{0,80}\b(f-?1|j-?1|(temporary|nonimmigrant|non-immigrant) visas?)\b'),
 ]
 # "F-1 visa holders with OPT who will require H-1B status ... will not be considered" is about OPT, after graduation.
 OPT_HOLDERS = re.compile(r'\b(with|on|using)\s+(optional practical training|opt)\b')
@@ -728,9 +733,95 @@ def user_status(prof):
         citizen = True if re.search(r'\bu ?s citizen', auth) else None
     degree = prof.get('degree') or ((prof.get('education') or [{}])[0] or {}).get('degree', '')
     term = re.search(r'(summer|fall|winter|spring)\s+(20\d{2})', str(prof.get('internshipTerm', '')), re.I)
+    year = int(term.group(2)) if term else dt.date.today().year
+    avail = str(prof.get('availableFrom') or '').strip()
+    days = dates_in(avail, year)
     return {'citizen': citizen, 'permanent': bool(re.search(r'green card|permanent resident|\blpr\b', auth)),
             'visa': visa.group(0).upper().replace(' ', '-') if visa else '', 'degree': degree_level(degree),
-            'below_senior': below_senior(prof, term.group(0) if term else 'Summer 2027'), 'sponsor': prof.get('needsSponsorship') == 'yes'}
+            'below_senior': below_senior(prof, term.group(0) if term else 'Summer 2027'), 'sponsor': prof.get('needsSponsorship') == 'yes',
+            # the earliest day the user can start: a month alone ("June 2027") means its first day
+            'available_from': days[0][2] if days else None, 'available_text': avail, 'year': days[0][2].year if days else year,
+            'season': term.group(1).lower() if term else None}
+
+
+MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+# "May 17", "May 17, 2027", "June 2027", "in May"; "6/1/2027" only with a year ("24/7", "3/5 days" aren't dates).
+# A month name without a day or year counts only after a word that puts a date there, since "may" is also a verb.
+DATE_WORDS = re.compile(r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|'
+                        r'nov(?:ember)?|dec(?:ember)?)\.?(?:\s+(\d{1,2})(?:st|nd|rd|th)?\b)?(?:,?\s+(20\d{2}))?\b'
+                        r'|\b(\d{1,2})/(\d{1,2})/(20\d{2})\b', re.I)
+MONTH_ONLY_AFTER = re.compile(r'\b(in|on|of|from|by|early|mid|late|beginning|end|starting|beginning in|through|until)\s*-?\s*$')
+# "May/June", "May or June", "June and July": a month right after another date in a list
+MONTH_LISTED = re.compile(r'(\/|\b(or|and|to|through)\s+((early|mid|late)\s*-?\s*)?)$')
+
+
+def dates_in(text, year):
+    """(start, end, first day, last day) of each date in the text. A month alone spans the whole month."""
+    import calendar
+    out = []
+    for m in DATE_WORDS.finditer(text):
+        if m.group(4):
+            mo, day, yr = int(m.group(4)), int(m.group(5)), int(m.group(6))
+        else:
+            mo = MONTH_ABBR.index(m.group(1)[:3].lower()) + 1
+            day, yr = (int(m.group(2)) if m.group(2) else None), (int(m.group(3)) if m.group(3) else year)
+            before = text[:m.start()]
+            listed = out and m.start() - out[-1][1] <= 14 and MONTH_LISTED.search(before)
+            if day is None and not m.group(3) and not MONTH_ONLY_AFTER.search(before) and not listed:
+                continue
+            if not m.group(3):
+                # "May/June 2027": the year after the list belongs to every month in it
+                later = re.match(r'\s*(\/|or|and|to|through|-|–)\s*[a-z]+\.?(\s+\d{1,2}\w*)?,?\s+(20\d{2})', text[m.end():])
+                yr = int(later.group(3)) if later else yr
+        if not 1 <= mo <= 12:
+            continue
+        last = calendar.monthrange(yr, mo)[1]
+        if day is not None and not 1 <= day <= last:
+            continue
+        out.append((m.start(), m.end(), dt.date(yr, mo, day or 1), dt.date(yr, mo, day or last)))
+    return out
+
+
+# A start date the posting sets: "must be available to start on May 17", "the program runs from May 26 to August 14",
+# "Internship program begins Monday, May 24, 2027". Not dates about applying, interviews, graduation or offers.
+START_WORDS = re.compile(r'\b(start(s|ing)?|begin(s|ning)?|commenc(e|es|ing)|kicks? off|first day|report(ing)? date|runs from|'
+                         r'(program|internship|cohort) (runs|dates?|period|will run|takes place)|available (from|beginning))\b')
+NOT_START = re.compile(r'\b(appl(y|ied|ying|ications?)|deadline|posted|interview\w*|clos(e|es|ing)|review(ed|ing)?|graduat\w*|offers?|'
+                       r'decisions?|notif\w*|submi\w*|recruit\w*|career fair|info(rmation)? sessions?|webinars?|events?|salary|pay)\b')
+# "Interns may start as early as May 18" or "June 1 or later" sets no limit on a later start.
+START_ANY_LATER = re.compile(r'\b(as early as|or later|or after|no earlier than|at the earliest)\b')
+START_HEDGE = re.compile(r'\b(typically|usually|generally|normally|tentative\w*|approximately|approx|around|roughly|flexib\w*|prefer\w*|'
+                         r'ideally|may|might|expected|estimated|anticipated|tbd|subject to change|or later|later start|var(y|ies)|depending|negotiable)\b')
+
+
+def early_start(low, st):
+    """'skip' or 'check' when the sentence sets a start date before the user's availableFrom, else None. Every start
+    date it offers has to be too early ("June 1 or June 15" with June 10 is fine); in a range, only the first counts."""
+    first = st.get('available_from')
+    if not first or NOT_START.search(low) or START_ANY_LATER.search(low):
+        return None
+    # A line about another term in a posting that lists several ("Winter (Starts January/February 2027)")
+    seasons = set(re.findall(r'\b(winter|spring|summer|fall|autumn)\b', low))
+    if seasons and st.get('season') and st['season'] not in seasons:
+        return None
+    word = START_WORDS.search(low)
+    if not word:
+        return None
+    found = [d for d in dates_in(low, st['year']) if d[0] >= word.start()]
+    if not found:
+        return None
+    # Other start dates offered: "May 24th and June 14th", "May or June", "May/June"; not the end of a range.
+    options = [found[0]] + [d for d in found[1:] if re.search(r'(\/|\b(or|and)\s+((early|mid|late)\s*-?\s*|the (beginning|end) of\s+)?)$', low[:d[0]])]
+    # "beginning in May-June", "Mid May- Mid June": a short range is a window to start in, not the program's dates
+    if len(found) > 1 and re.search(r'(-|–|\bto|\bthrough|\buntil)\s*((early|mid|late)\s*-?\s*)?$', low[:found[1][0]]) \
+            and (found[1][2] - found[0][2]).days <= 45:
+        options.append(found[1])
+    if any(last >= first for _, _, _, last in options):
+        return None
+    plain = low
+    for s, e, _, _ in reversed(dates_in(low, st['year'])):  # "in May" isn't the hedge "may"
+        plain = plain[:s] + ' ' + plain[e:]
+    return 'check' if START_HEDGE.search(plain) else 'skip'
 
 
 REQUIRED_HEAD = re.compile(r'\b(required|requirements|minimum|basic|must have|what you need|you must|eligibility)\b', re.I)
@@ -797,7 +888,7 @@ def screen(p, st):
         if on_visa and not maybe and (visa_bar or training) and not TRAINING_OK.search(low):
             # Unsure when the visa is only an example of needing sponsorship later ("requiring future sponsorship
             # (for example, following F-1 OPT/CPT)"), not a status turned away ("temporary visas such as F-1 ... are not eligible").
-            first_visa = min([m.start() for m in (VISA.search(low), re.search(r'\bcpt\b', low)) if m] or [len(low)])
+            first_visa = min([m.start() for m in (VISA.search(low), TEMP_VISA.search(low), re.search(r'\bcpt\b', low)) if m] or [len(low)])
             later = ((FUTURE_SPONSOR.search(low) and -1 < low.find('sponsor') < first_visa)
                      or re.search(r'\b(f-?1|j-?1)( \(student\))?( visas?)?( holders?)? who (will )?(require|need)\b[^.]{0,30}\bsponsor', low)  # "F-1 (student) visa holders who require employer sponsorship in the future"
                      or (follows and FUTURE_WORDS.search(low)))  # "This includes ... CPT ... but would need H-1B sponsorship within a few years"
@@ -834,6 +925,9 @@ def screen(p, st):
             hits.append(('check', 'degree level', s))
         elif st['below_senior'] is False and st['sponsor'] and NO_SPONSOR.search(low):
             hits.append(('check', 'sponsorship', s))
+        early = early_start(low, st)
+        if early:
+            hits.append((early, f"starts before {st['available_text']}", s))
         # Under a "Preferred" heading only a degree line is plainly a preference; an export-control or citizenship
         # paragraph at the end of a posting often has no heading of its own, so it becomes a check, not a skip.
         if preferred and len(hits) > before and hits[-1][0] == 'skip':
