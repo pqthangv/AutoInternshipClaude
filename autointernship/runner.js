@@ -21,7 +21,8 @@ async function runFill(tabId, opts = {}) {
       sum.fields.push(...(v.fields || []));
       sum.prefilled.push(...(v.prefilled || []));
       sum.todo.push(...(v.todo || []));
+      sum.tidied.push(...(v.tidied || []));
     }
     return sum;
-  }, { filled: 0, left: 0, resume: null, fields: [], prefilled: [], todo: [], saved: 0 });
+  }, { filled: 0, left: 0, resume: null, fields: [], prefilled: [], todo: [], tidied: [], saved: 0 });
 }

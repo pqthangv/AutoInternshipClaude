@@ -2,7 +2,8 @@
    Injected into the current tab only when you click "Fill this page", press the shortcut, or
    (if you turned it on) Claude asks through the bridge (bridge.js).
    It reads your profile from chrome.storage.local, fills the fields it recognizes, never
-   overwrites anything that already has a value, and outlines fields on the page:
+   overwrites anything that already has a value (except tidying work descriptions Workday copied
+   badly from your resume, see tidyDescription), and outlines fields on the page:
      solid green  = filled from your profile
      dashed amber = still empty, for you or Claude
    fill() also returns a report for Claude: each field it filled with the value now on the page,
@@ -798,6 +799,120 @@
     return true;
   }
 
+  /* ---------- Work descriptions copied from the resume ---------- */
+
+  // Workday's "Autofill with Resume" reads the uploaded PDF and copies each job's description into a box.
+  // A PDF stores printed lines, not sentences, so a bullet that wraps on the page arrives as two lines
+  // ("...cutting manual triage" / "time by 60%."), and the first bullet loses its "•". The copy also runs
+  // from one job's dates to the next date it finds, so after the last job it takes the next section's
+  // heading and the first line under it ("Projects" / "Northwind App | Python, React"). Claude never sees
+  // this on its own: the report cuts long values short and page text leaves out what's in text boxes.
+  // So this is the one place the fill changes a box that already has a value. It only deletes those
+  // copied lines and joins the broken ones (plus the lost "•"), never adds words, and leaves the box
+  // alone, listed for Claude, when something in it doesn't fit that pattern. Only Workday's boxes: on
+  // other sites a description in a box is more likely one you typed.
+  const ROLE_DESCRIPTION = /^workExperience-\d+--roleDescription$/;
+  const BULLET = /^[•●▪◦‣·*–-]\s+/;
+  // A line made only of these words is a resume section heading ("Projects", "Leadership & Entrepreneurship",
+  // "TECHNICAL SKILLS"), which never belongs in a job's description.
+  const HEADING_WORDS = new Set(['projects', 'project', 'experience', 'experiences', 'education', 'skills',
+    'leadership', 'activities', 'extracurriculars', 'extracurricular', 'awards', 'honors', 'honours',
+    'achievements', 'publications', 'certifications', 'certificates', 'volunteering', 'volunteer', 'languages',
+    'interests', 'coursework', 'involvement', 'entrepreneurship', 'employment', 'research', 'summary',
+    'objective', 'references', 'service', 'competitions', 'hackathons', 'scholarships', 'qualifications']);
+  const HEADING_EXTRA = new Set(['and', 'selected', 'personal', 'academic', 'technical', 'relevant',
+    'professional', 'work', 'key', 'other', 'additional', 'community', 'campus', 'student', 'side', 'software',
+    'engineering', 'tools', 'technologies', 'information', 'profile']);
+
+  function isHeading(line) {
+    const t = line.trim().replace(/:$/, '');
+    // A heading is short, has no digits or sentence marks, and starts each word with a capital ("and" aside),
+    // so a broken line like "and leadership" isn't one.
+    if (!t || t.length > 50 || /[^A-Za-z&/,\s-]/.test(t)) return false;
+    const words = t.replace(/&/g, ' and ').split(/[\s/,-]+/).filter(Boolean);
+    if (words.length > 5 || words.some((w) => w !== 'and' && !/^[A-Z]/.test(w))) return false;
+    const low = words.map((w) => w.toLowerCase());
+    return low.some((w) => HEADING_WORDS.has(w)) && low.every((w) => HEADING_WORDS.has(w) || HEADING_EXTRA.has(w));
+  }
+
+  const letters = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  const finished = (s) => /[.!?]["')\]]?$/.test(s);
+
+  // null: nothing to change. { left: why }: leave the box for Claude. { text, removed, joined }: the
+  // tidied text, the lines cut off the end and how many broken lines were joined.
+  // others: [{ company, location }] of the other work entries on the page. The copy sometimes ends with
+  // the next job's own first line ("Northwind Labs Seattle, WA"), which is exactly that entry's Company
+  // and Location boxes run together.
+  function tidyDescription(value, others = []) {
+    const lines = String(value || '').replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) return null;
+    if (isHeading(lines[0])) return { left: `starts with the heading "${lines[0]}", so it may be another part of the resume` };
+    const nextJob = (l) => !finished(l) && others.some((o) => {
+      const k = letters(l);
+      const c = letters(o.company);
+      return c.length >= 3 && k.startsWith(c) && (k === c || k.slice(c.length) === letters(o.location));
+    });
+    const pipe = (l) => /\s\|\s/.test(l);
+    let end = lines.findIndex((l, i) => i > 0 && (isHeading(l) || (!BULLET.test(l) && nextJob(l))));
+    if (end < 0) end = lines.length;
+    // A job with one bullet comes without any "•" (the first one is the one lost).
+    const bulleted = lines.slice(1, end).some((l) => BULLET.test(l));
+    // A printed line that wraps onto the next one runs nearly the full width of the page.
+    const wide = Math.max(...lines.slice(0, end).map((l) => l.replace(BULLET, '').length));
+    const wraps = (l) => !finished(l) && l.replace(BULLET, '').length >= Math.max(40, 0.7 * wide);
+    const left = (l) => ({ left: `may hold text from another part of the resume: "${l.slice(0, 80)}"` });
+    const out = [lines[0]];
+    let joined = 0;
+    for (let i = 1; i < end; i++) {
+      const l = lines[i];
+      if (BULLET.test(l)) { out.push(l); continue; }
+      if (pipe(l)) return left(l);
+      // A line without a "•" is the rest of the bullet above only when the line above runs the full width
+      // and stops mid-sentence, and the lines after it then finish the sentence. Anything else (text after
+      // a finished sentence, a short line, bullets written without a final period) can't be told apart from
+      // another entry's text: left for Claude when there are bullets, kept as it is in text without them.
+      let j = i;
+      while (j < end - 1 && !BULLET.test(lines[j + 1]) && !finished(lines[j]) && wraps(lines[j])) j++;
+      const run = lines.slice(i, j + 1);
+      if (wraps(lines[i - 1]) && finished(lines[j]) && !run.some(pipe)) {
+        out[out.length - 1] = [out[out.length - 1], ...run].join(' ');
+        joined += run.length;
+        i = j;
+        continue;
+      }
+      if (bulleted) return left(l);
+      out.push(l);
+    }
+    const removed = lines.slice(end).join(' / ');
+    if (!removed && !joined) return null;
+    const dot = bulleted && out.slice(1).map((l) => l.match(BULLET)).find(Boolean);
+    if (dot && !BULLET.test(out[0])) out[0] = dot[0] + out[0];
+    return { text: out.join('\n'), removed, joined };
+  }
+
+  // n: the box's place among the work entries ("Work Experience 3"). True when the box was reported here.
+  function tidyRoleDescription(el, raw, n, stats) {
+    const own = el.id.replace(/roleDescription$/, '');
+    const others = deepQuery(document, 'input[id^="workExperience-"][id$="--companyName"]')
+      .filter((c) => !c.id.startsWith(own))
+      .map((c) => {
+        const where = document.getElementById(c.id.replace(/companyName$/, 'location'));
+        return { company: String(c.value || '').trim(), location: where ? String(where.value || '').trim() : '' };
+      });
+    const r = tidyDescription(el.value, others);
+    if (!r) return false;
+    const label = `${raw} (Work Experience ${n})`;
+    if (r.left) { noteLeft(el, stats, label, 'textarea', { note: r.left }); return true; }
+    setValue(el, r.text);
+    if (String(el.value).replace(/\r\n?/g, '\n') !== r.text) {
+      noteLeft(el, stats, label, 'textarea', { note: 'has lines copied badly from the resume, and the box kept them' });
+      return true;
+    }
+    mark(el, 'filled');
+    stats.tidied.push({ label: tidy(label), removed: r.removed.slice(0, 300), joined: r.joined });
+    return true;
+  }
+
   /* ---------- Outlines ---------- */
 
   const listeners = new WeakMap();
@@ -856,7 +971,10 @@
   //   stats.prefilled: [{ label, value, profile? }]             already had a value (you, an earlier fill, or
   //                                                             the site itself, like Workday's resume parsing);
   //                                                             never changed, no outline
-  //   stats.todo:      [{ label, kind, options?, required? }]   left, with the choices if known
+  //   stats.todo:      [{ label, kind, options?, required?, note? }]   left, with the choices if known;
+  //                                                             note says why when the kind doesn't
+  //   stats.tidied:    [{ label, removed, joined }]             a work description the site copied badly
+  //                                                             from the resume, tidied (see tidyDescription)
   //
   // profile is set when a name box holds something other than your profile's name. Sites' resume parsers
   // often split a two-word first name ("Mei Ling Chen" → first "Mei", last "Ling Chen"), and the fill never
@@ -884,6 +1002,7 @@
     const item = { label: tidy(label), kind };
     if (extra.options && extra.options.length) item.options = extra.options.map((o) => tidy(o)).filter(Boolean).slice(0, 40);
     if (extra.required) item.required = true;
+    if (extra.note) item.note = extra.note;
     stats.todo.push(item);
   }
 
@@ -1341,8 +1460,9 @@
     clearMarks();
     // saved: how many saved answers the extension has. Claude adds new ones to profile.json, which reaches the
     // extension only when you restore it from that backup; the count in the report shows when that was missed.
-    const stats = { filled: 0, left: 0, resume: null, fields: [], prefilled: [], todo: [], saved: (p.savedAnswers || []).length };
+    const stats = { filled: 0, left: 0, resume: null, fields: [], prefilled: [], todo: [], tidied: [], saved: (p.savedAnswers || []).length };
     const counters = Object.create(null);
+    let roles = 0; // Workday work descriptions seen so far, for "Work Experience N" in the report
     const state = { resumeDone: false };
     const groups = new Map();
     const checkGroups = new Map();
@@ -1402,7 +1522,9 @@
 
       const kind = tag === 'SELECT' ? 'select' : tag === 'TEXTAREA' ? 'textarea' : 'text';
       const res = answerFor(p, label, hints, el, kind, counters); // runs first so job/school order stays right
-      if (hasValue(el)) { // never overwrite
+      const role = kind === 'textarea' && ROLE_DESCRIPTION.test(el.id) ? ++roles : 0;
+      if (role && hasValue(el) && tidyRoleDescription(el, raw, role, stats)) continue;
+      if (hasValue(el)) { // never overwrite (Workday's copied work descriptions aside, just above)
         notePrefilled(stats, raw, kind === 'select' ? el.options[el.selectedIndex].text : el.value, res && res.rule && res.rule.name ? res.value : null);
         continue;
       }

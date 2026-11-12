@@ -8,8 +8,10 @@ function showResult(r) {
   $('#leftText').textContent = r.left ? `${count(r.left, 'field', 'fields')} still empty` : 'Nothing left empty';
 
   const notes = [];
+  const tidied = (r.tidied || []).length;
   if (r.resume) notes.push(`Attached ${r.resume}.`);
-  if (!r.filled && !r.left) notes.push('No form fields found here. If the form opens in a pop-up, open it first, then fill again.');
+  if (tidied) notes.push(`Tidied ${count(tidied, 'work description', 'work descriptions')} the site copied badly from your resume.`);
+  if (!r.filled && !r.left && !tidied) notes.push('No form fields found here. If the form opens in a pop-up, open it first, then fill again.');
   else if (r.left) notes.push('Fill the amber fields yourself, or let Claude finish them.');
   $('#note').textContent = notes.join(' ');
   $('#note').hidden = !notes.length;

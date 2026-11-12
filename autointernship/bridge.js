@@ -159,7 +159,8 @@
   function reportText(r) {
     if (!r.ok) return `AutoInternship couldn't fill this page: ${r.error}`;
     // The saved-answer count lets Claude see when the extension is behind profile.json (see autofill.js).
-    const lines = [`AutoInternship report: filled ${r.filled}, left ${r.left}.${r.saved != null ? ` Profile: ${r.saved} saved answers.` : ''}`];
+    const tidied = r.tidied || [];
+    const lines = [`AutoInternship report: filled ${r.filled}, left ${r.left}${tidied.length ? `, tidied ${tidied.length}` : ''}.${r.saved != null ? ` Profile: ${r.saved} saved answers.` : ''}`];
     const differ = r.prefilled.filter((f) => f.profile);
     const same = r.prefilled.filter((f) => !f.profile);
     if (differ.length) {
@@ -171,7 +172,15 @@
     }
     if (r.todo.length) {
       lines.push('', 'Left for you or Claude (* = required):', ...r.todo.map((t) =>
-        `- ${cut(t.label, 90)}${t.required ? '*' : ''} (${KIND[t.kind] || t.kind}${t.options ? `: ${choices(t.options)}` : ''})`));
+        `- ${cut(t.label, 90)}${t.required ? '*' : ''} (${t.note || `${KIND[t.kind] || t.kind}${t.options ? `: ${choices(t.options)}` : ''}`})`));
+    }
+    // Work descriptions the site copied badly from the resume (see tidyDescription in autofill.js). Said in
+    // full, because the record should mention it and Claude can't see the whole box otherwise.
+    if (tidied.length) {
+      lines.push('', 'Tidied (the site copied these badly from the resume):', ...tidied.map((t) => {
+        const what = [t.removed && `removed "${cut(t.removed, 120)}"`, t.joined && `joined ${t.joined} broken line${t.joined > 1 ? 's' : ''}`];
+        return `- ${cut(t.label, 60)}: ${what.filter(Boolean).join('; ')}`;
+      }));
     }
     if (r.fields.length) lines.push('', `Filled: ${r.fields.map(pair).join(' · ')}`);
     if (same.length) lines.push('', `Already filled: ${same.map(pair).join(' · ')}`);
