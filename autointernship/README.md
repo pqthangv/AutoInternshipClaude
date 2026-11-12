@@ -1,6 +1,6 @@
 # AutoInternship
 
-A Chrome extension that fills job applications from a profile you save once, then leaves the rest to Claude. It never overwrites what's already filled and never submits.
+A Chrome extension that fills job applications from a profile you save once, then leaves the rest to Claude. It never submits, and never overwrites what's already filled, apart from tidying work descriptions Workday copied badly from your resume.
 
 - **Solid green outline**: filled from your profile.
 - **Dashed amber outline**: still empty, for you or Claude.
@@ -24,6 +24,8 @@ Fill in the profile page once. Put your current school first under Education. At
 Click **Fill with AutoInternship** on the right edge of the application page. A panel lists what was filled, what was already filled and what's left. You can also use **Fill this page** in the popup or **Alt+Shift+F**; those also attach your stored resume, but the page button doesn't.
 
 On forms with several steps (Workday's **Save and Continue**), fill again on each step. Running it twice is safe.
+
+On Workday's work experience step, it also tidies each job's description that Workday copied from your resume: it joins lines broken in the middle of a sentence, puts back the first "•", and removes another section's heading or the next job's first line copied in at the end. The panel lists what it changed. A description it can't sort out is left as it is and listed as left.
 
 ## Use with Claude
 
