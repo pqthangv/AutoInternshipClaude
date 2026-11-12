@@ -84,8 +84,12 @@ Don't leave the step that takes the resume until it shows the tailored PDF's fil
 it there (on iCIMS, Replace Resume shows the file box), stop on that step and hand it over.
 Attach or paste the cover letter wherever the form takes one, optional fields included (filling.md, "Cover letter").
 Leave optional opt-ins (marketing or survey emails, talent communities, texts about other jobs) as they are.
-On Workday, fix the parsed work entries on My Experience before its Save and Continue; never go back from the
-review page to change them.
+On Workday, fix the parsed work entries on My Experience before its Save and Continue. The Fill button tidies
+the Role Descriptions; one it lists under Left gets that entry's bullets from resume-src/ (filling.md, "Filling
+the form"). On the review page, read every Role Description in the page text: a section heading ("Projects"),
+a "Name | tools" line, another job's first line or a sentence broken over two lines still in one goes under
+Left for you and on the For the user line, with the exact lines to delete. Never go back from the review page
+to change work entries.
 The user <saw | didn't see (auto)> the drafted answers.
 For this application only: fill the form in the user's browser up to the review page or the first thing
 that needs the user, add each page's fields to application-record.md as you go, and log the tracker row
