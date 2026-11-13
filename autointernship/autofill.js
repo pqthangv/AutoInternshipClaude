@@ -177,6 +177,15 @@
   const BOTH_NAMES = /\bfirst( name)? ?(and|&|\/|\+|,) ?last ?names?\b|\bname \(first,? ?(and |& |\/ ?)?last\)|\bprefer\w* full name\b/;
   const bothNames = (p, label) => [/\bprefer/.test(label) ? p.preferredName || p.firstName : p.firstName, p.lastName].filter(Boolean).join(' ');
 
+  // Boxes inside one of the entries on a work or education history: Workday's "workExperience-4--location",
+  // a box labeled "Employer City" or "School Location". Your own address never belongs there, but Workday's
+  // resume reader leaves a job's Location empty when it can't read it, and the plain "Location" label then
+  // got your home city and state from the home-location rule (seen on more than a dozen applications).
+  // home: true marks the rules for your own address, which skip these boxes; they're left for Claude.
+  const ENTRY_HINT = /\b(work experience|work history|job history|experiences?|employers?|employment|education|schools?)\b/;
+  const ENTRY_LABEL = /\b(employer|company|school|college|university|institution)('s)?\b/;
+  const inEntry = (label, hints) => ENTRY_LABEL.test(label || '') || hints.some((h) => ENTRY_HINT.test(h));
+
   // Order matters: the first rule that matches a field wins.
   // name: true marks your own name, which the report checks against what the site already put there.
   const RULES = [
@@ -190,12 +199,12 @@
     { re: /\blinked ?in\b/, max: 100, url: true, value: (p) => p.linkedin },
     { re: /\bgit ?hub\b/, max: 100, url: true, value: (p) => p.github },
     { re: /\bportfolio\b|\bpersonal (web ?)?site\b|^(personal |your )?web ?site( url)?$|\bhomepage\b|^other (web ?site|url|link)s?$|^urls?$|\bblog\b/, max: 80, url: true, not: /\b(linked ?in|twitter|facebook|instagram|company|employer)\b/, value: (p) => p.portfolio || p.website },
-    { re: /^(current |your |home )?location$|\bwhere are you (currently )?(located|based)\b|^city,? state\b|^current (city|location)\b|^location \(city\)$|^based in\b/, max: 60, value: loc },
-    { re: /\bcity\b|\btown\b/, ac: ['address-level2'], max: 40, not: /\b(desired|prefer\w*|relocat\w*|birth)\b/, value: (p) => p.city },
-    { re: /^(state|province|region)$|^state ?(\/|or) ?province$|^state of residence$/, hint: /\b(state|province|region)$/, ac: ['address-level1'], max: 40, value: (p) => p.state },
-    { re: /\bzip\b|\bpostal\b|\bpost ?code\b/, ac: ['postal-code'], max: 40, value: (p) => p.postalCode },
-    { re: /\bcountry\b/, ac: ['country', 'country-name'], max: 40, not: /\b(code|phone|dial|citizen\w*|authori\w*|visa|which countr\w*|other countr\w*)\b/, value: (p) => p.country },
-    { re: /\bstreet\b|^address( line)? ?1$|^(home |mailing |street |current )?address$/, hint: /\baddress line ?1$|\bstreet( address)?$|^address$/, ac: ['address-line1', 'street-address'], max: 40, not: /\b(e[ -]?mail|ip|web|url|line ?2|address ?2|apartment|apt|suite|city|state|zip|postal|country)\b/, value: (p) => p.street },
+    { re: /^(current |your |home )?location$|\bwhere are you (currently )?(located|based)\b|^city,? state\b|^current (city|location)\b|^location \(city\)$|^based in\b/, max: 60, home: true, value: loc },
+    { re: /\bcity\b|\btown\b/, ac: ['address-level2'], max: 40, not: /\b(desired|prefer\w*|relocat\w*|birth)\b/, home: true, value: (p) => p.city },
+    { re: /^(state|province|region)$|^state ?(\/|or) ?province$|^state of residence$/, hint: /\b(state|province|region)$/, ac: ['address-level1'], max: 40, home: true, value: (p) => p.state },
+    { re: /\bzip\b|\bpostal\b|\bpost ?code\b/, ac: ['postal-code'], max: 40, home: true, value: (p) => p.postalCode },
+    { re: /\bcountry\b/, ac: ['country', 'country-name'], max: 40, not: /\b(code|phone|dial|citizen\w*|authori\w*|visa|which countr\w*|other countr\w*)\b/, home: true, value: (p) => p.country },
+    { re: /\bstreet\b|^address( line)? ?1$|^(home |mailing |street |current )?address$/, hint: /\baddress line ?1$|\bstreet( address)?$|^address$/, ac: ['address-line1', 'street-address'], max: 40, not: /\b(e[ -]?mail|ip|web|url|line ?2|address ?2|apartment|apt|suite|city|state|zip|postal|country)\b/, home: true, value: (p) => p.street },
 
     { re: /\b(current|present|most recent|latest) (company|employer|organi[sz]ation)\b|^org$/, max: 60, not: /\b(refer\w*|previous|former|desired|why)\b/, value: W0('company') },
     { re: /\b(current|present|most recent|latest) (job )?(title|position|role)\b/, max: 60, value: W0('title') },
@@ -374,6 +383,7 @@
 
   function matches(rule, label, hints, el) {
     if (rule.within && !el.closest(rule.within)) return false;
+    if (rule.home && inEntry(label, hints)) return false;
     const texts = label ? [label, ...hints] : hints;
     if (rule.not && texts.some((t) => rule.not.test(t))) return false;
     const ac = acToken(el);
@@ -888,6 +898,23 @@
     const dot = bulleted && out.slice(1).map((l) => l.match(BULLET)).find(Boolean);
     if (dot && !BULLET.test(out[0])) out[0] = dot[0] + out[0];
     return { text: out.join('\n'), removed, joined };
+  }
+
+  // "Location (Work Experience 4)" for a box in Workday's 4th work entry, so a box left for Claude says which
+  // entry it belongs to (every entry's boxes have the same labels). n counts the entries on the page in order,
+  // like the Role Description numbers below, since the ids' own numbers can skip.
+  const ENTRY_ID = /^(workExperience|education)-\d+--/;
+  function entryLabel(el, raw) {
+    const m = ENTRY_ID.exec(el.id || '');
+    if (!m) return raw;
+    const kind = m[1];
+    const own = m[0];
+    const seen = [];
+    for (const e of deepQuery(document, `[id^="${kind}-"]`)) {
+      const k = (ENTRY_ID.exec(e.id) || [])[0];
+      if (k && !seen.includes(k)) seen.push(k);
+    }
+    return `${raw} (${kind === 'education' ? 'Education' : 'Work Experience'} ${seen.indexOf(own) + 1})`;
   }
 
   // n: the box's place among the work entries ("Work Experience 3"). True when the box was reported here.
@@ -1535,7 +1562,7 @@
         noteFilled(el, stats, raw, kind === 'select' ? el.options[el.selectedIndex].text : el.value, res.nearest ? res.value : null);
       } else {
         const options = kind === 'select' ? optionTexts([...el.options].map((o) => ({ text: o.text, val: o.value }))) : null;
-        noteLeft(el, stats, raw, kind === 'select' ? 'dropdown' : kind, { options, required: isRequired(el, raw) });
+        noteLeft(el, stats, entryLabel(el, raw), kind === 'select' ? 'dropdown' : kind, { options, required: isRequired(el, raw) });
       }
     }
 

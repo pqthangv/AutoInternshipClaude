@@ -85,8 +85,8 @@ it there (on iCIMS, Replace Resume shows the file box), stop on that step and ha
 Attach or paste the cover letter wherever the form takes one, optional fields included (filling.md, "Cover letter").
 Leave optional opt-ins (marketing or survey emails, talent communities, texts about other jobs) as they are.
 On Workday, fix the parsed work entries on My Experience before its Save and Continue. The Fill button tidies
-the Role Descriptions; one it lists under Left gets that entry's bullets from resume-src/ (filling.md, "Filling
-the form"). On the review page, read every Role Description in the page text: a section heading ("Projects"),
+the Role Descriptions; one it lists under Left gets that entry's bullets from resume-src/, and a Location it
+leaves gets that entry's place from the resume, never the user's address (filling.md, "Filling the form"). On the review page, read every Role Description in the page text: a section heading ("Projects"),
 a "Name | tools" line, another job's first line or a sentence broken over two lines still in one goes under
 Left for you and on the For the user line, with the exact lines to delete. Never go back from the review page
 to change work entries.
