@@ -39,7 +39,7 @@ Name, contact details, address, links, education, student questions (graduation,
 - **Voluntary self-identification** (gender, pronouns, Hispanic or Latino, race, veteran, disability, LGBTQ+, transgender, sexual orientation) is filled only with the choice you pick for each, including "Decline to answer". "Not set" leaves it for you.
 - **Saved answers** teach it new questions: if the question itself (not a sentence before it) contains your phrase as whole words, it uses your answer. When several phrases fit, the longest wins.
 
-It always leaves these for you or Claude: open-ended questions, cover letters, consent and "I certify" checkboxes, religion and marital status questions, ID numbers, date of birth, bank details, and anything it can't match confidently.
+It always leaves these for you or Claude: open-ended questions, cover letters, consent and "I certify" checkboxes, religion and marital status questions, ID numbers, date of birth, bank details, the location boxes of a past job or school (your own address never goes there), and anything it can't match confidently.
 
 ## Privacy
 

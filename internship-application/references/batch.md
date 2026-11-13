@@ -80,15 +80,26 @@ site (filling.md, "iCIMS has no review page"). That step's heading counts its fo
 ("Portal Specific Forms (1/3)"): click Submit on each form before the final one, then fill the final one
 (3/3) and stop without clicking Submit. With no count, treat the form on screen as the final one.
 In Review mode, stop when that last step opens.
+iCIMS's "Create a login" step (Login and Password boxes above the profile) is a form page: fill all of it, the
+files and the profile's email in Login included, and leave only the two password boxes. Then hand over: the user
+types a password in both and clicks Submit (filling.md, "Sign-ins and accounts"). Open iCIMS links as they are;
+when the company's site wraps the form and read_page shows no fields, call read_page with the filter "all" once
+and use the references it lists (filling.md, "Keep browser work cheap").
 Don't leave the step that takes the resume until it shows the tailored PDF's file name; if you can't attach
 it there (on iCIMS, Replace Resume shows the file box), stop on that step and hand it over.
 Attach or paste the cover letter wherever the form takes one, optional fields included (filling.md, "Cover letter").
 Leave optional opt-ins (marketing or survey emails, talent communities, texts about other jobs) as they are.
+How did you hear, with no true option: a job board's "Other", then "Other", then the company's careers page; a
+named site only when none of those is offered. On a Workday search list, type the item's own name ("Other Job
+Board", not "Job Board"), press Enter once, click its reference and check "1 item selected, <that item>"; if
+another item shows, clear it and pick again before Save and Continue (filling.md, "Keep browser work cheap").
 On Workday, fix the parsed work entries on My Experience before its Save and Continue. The Fill button tidies
-the Role Descriptions; one it lists under Left gets that entry's bullets from resume-src/ (filling.md, "Filling
-the form"). On the review page, read every Role Description in the page text: a section heading ("Projects"),
-a "Name | tools" line, another job's first line or a sentence broken over two lines still in one goes under
-Left for you and on the For the user line, with the exact lines to delete. Never go back from the review page
+the Role Descriptions; one it lists under Left gets that entry's bullets from resume-src/. A past job's location
+box it leaves (Workday or iCIMS) gets that entry's place from the resume, never the user's address (filling.md,
+"Filling the form").
+On the review page, read every Role Description in the page text: a section heading ("Projects"), a "Name |
+tools" line, another job's first line or a sentence broken over two lines still in one goes under Left for you
+and on the For the user line, with the exact lines to delete. Never go back from the review page
 to change work entries.
 The user <saw | didn't see (auto)> the drafted answers.
 For this application only: fill the form in the user's browser up to the review page or the first thing
@@ -100,7 +111,7 @@ answers under To save.
 Browser work (filling.md has the rest): find fields with find or read_page and click or scroll_to them by
 reference, never by screen position, and never scroll by screen position. At most one screenshot per page,
 as a call of its own, never inside a batch.
-- Job folder: <folder>  Application link: <url; an icims.com link with in_iframe=1 added>  Resume: <PDF path>  Answers: <drafts file, or none>
+- Job folder: <folder>  Application link: <url>  Resume: <PDF path>  Answers: <drafts file, or none>
 - Cover letter: <letter path and cover-letter.txt path (and the combined PDF's), or none>  Master resume: <path>
 - Profile: <folder>/profile.json  Tracker: <folder>/tracker.xlsx
 - Tab: <open a new tab of your own | continue in tab <id>: the user has since <what they did>, and answered: <answers>
