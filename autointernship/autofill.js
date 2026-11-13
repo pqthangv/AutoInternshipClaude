@@ -184,7 +184,16 @@
   // home: true marks the rules for your own address, which skip these boxes; they're left for Claude.
   const ENTRY_HINT = /\b(work experience|work history|job history|experiences?|employers?|employment|education|schools?)\b/;
   const ENTRY_LABEL = /\b(employer|company|school|college|university|institution)('s)?\b/;
-  const inEntry = (label, hints) => ENTRY_LABEL.test(label || '') || hints.some((h) => ENTRY_HINT.test(h));
+  // iCIMS names give no such word: your address is "PersonProfileFields.AddressCity" and so on, but an employer's
+  // City, Address, Zip, Country and State on the same page are "PersonProfileFields.rcf3216" and similar, with
+  // the same plain labels. So on iCIMS's own profile boxes, only its Address ones are yours.
+  const ICIMS_FIELD = /ProfileFields\./;
+  const ICIMS_ADDRESS = /PersonProfileFields\.Address/;
+  function inEntry(label, hints, el) {
+    const name = el.getAttribute('name') || el.id || '';
+    if (ICIMS_FIELD.test(name)) return !ICIMS_ADDRESS.test(name);
+    return ENTRY_LABEL.test(label || '') || hints.some((h) => ENTRY_HINT.test(h));
+  }
 
   // Order matters: the first rule that matches a field wins.
   // name: true marks your own name, which the report checks against what the site already put there.
@@ -383,7 +392,7 @@
 
   function matches(rule, label, hints, el) {
     if (rule.within && !el.closest(rule.within)) return false;
-    if (rule.home && inEntry(label, hints)) return false;
+    if (rule.home && inEntry(label, hints, el)) return false;
     const texts = label ? [label, ...hints] : hints;
     if (rule.not && texts.some((t) => rule.not.test(t))) return false;
     const ac = acToken(el);
