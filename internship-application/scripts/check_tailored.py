@@ -245,9 +245,11 @@ def main():
         if facts['new_terms']:
             review.append('Terms not in the master: ' + ', '.join(facts['new_terms']) + '. Keep one only as the posting\'s word for '
                           'something the master shows (list it under Reworded); remove a tool, number or duty the master doesn\'t have.')
-        # check_resume.py counts every GitHub link in the master as contact, so a project's repo link goes missing
-        # whenever that project is cut. That's fine; only the user's own email, phone and profile links must stay.
-        repos = [c for c in facts['missing_contact'] if re.match(r'github\.com/[^/]+/.', c)]
+        # check_resume.py counts every LinkedIn and GitHub link in the master as contact, so a project's repo or
+        # LinkedIn post ("LinkedIn launch post") goes missing whenever that project is cut. That's fine; only the
+        # user's own email, phone and profile links (linkedin.com/in/<name>, github.com/<name>) must stay.
+        repos = [c for c in facts['missing_contact']
+                 if re.match(r'(linkedin|github)\.com/', c) and not re.match(r'(linkedin\.com/in|github\.com)/[^/]+/?$', c)]
         contact = [c for c in facts['missing_contact'] if c not in repos]
         if contact:
             fix.append('Contact details lost: ' + ', '.join(contact) + '. Keep them exactly as in the master.')

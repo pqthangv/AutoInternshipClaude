@@ -7,7 +7,7 @@ Usage:
 MASTER and CANDIDATE can be .tex, .pdf, .docx, .md or .txt. --known adds other files whose facts are
 the user's own (profile.json, an AutoInternship backup). --allow adds words that are fine to introduce,
 like the target company's name and the role title. --resume also checks that contact details (emails,
-phone numbers, LinkedIn and GitHub links) are unchanged.
+phone numbers, LinkedIn and GitHub links) are unchanged; in a PDF or .docx, an address behind a link counts.
 
 Reports, as JSON:
   new_numbers   numbers, percentages, amounts and years in CANDIDATE that appear nowhere in MASTER/known
@@ -54,6 +54,30 @@ def pdf_text(path):
     except FileNotFoundError:
         from pypdf import PdfReader
         return '\n'.join((p.extract_text() or '') for p in PdfReader(path).pages)
+
+
+def link_targets(path):
+    """The addresses behind a PDF's or .docx's links. A resume often shows "LinkedIn launch post" or a project's
+    name as the link text, so the address is only in the link. Before 2026-11-17 the contact check read only the
+    visible text, and nearly every tailored resume got a false "Contact details lost" for a link it kept."""
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext == '.pdf':
+            from pypdf import PdfReader
+            out = []
+            for page in PdfReader(path).pages:
+                for annot in page.get('/Annots') or []:
+                    uri = (annot.get_object().get('/A') or {}).get('/URI')
+                    if uri:
+                        out.append(str(uri))
+            return out
+        if ext == '.docx':
+            with zipfile.ZipFile(path) as z:
+                rels = z.read('word/_rels/document.xml.rels').decode('utf8', 'replace')
+            return re.findall(r'Target="([^"]+)"[^>]*TargetMode="External"', rels)
+    except Exception:  # no pypdf, or a file it can't read: the visible text alone decides, as before
+        return []
+    return []
 
 
 def read(path):
@@ -143,7 +167,8 @@ def main():
         r'\[(?:company|role|team|name|insert[^\]]*|your [^\]]*|[A-Z ]{3,})\]|\bTODO\b|\bTBD\b|\bXXX+\b|lorem ipsum|<[a-z ]+>', cand, re.I)))
     missing = []
     if a.resume:
-        cand_flat = re.sub(r'\s+', ' ', cand).lower()
+        # Link addresses join the text for this check only: numbers and terms inside a URL aren't claims.
+        cand_flat = re.sub(r'\s+', ' ', cand + '\n' + '\n'.join(link_targets(a.candidate))).lower()
         contact = set(re.findall(r'[\w.+-]+@[\w-]+\.[\w.]+', master))
         contact |= set(re.findall(r'(?:https?://)?(?:www\.)?(?:linkedin\.com|github\.com)/[\w/-]+', master))
         contact |= set(re.findall(r'\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}', master))
