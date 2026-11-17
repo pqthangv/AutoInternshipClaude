@@ -25,7 +25,7 @@ Click **Fill with AutoInternship** on the right edge of the application page. A 
 
 On forms with several steps (Workday's **Save and Continue**), fill again on each step. Running it twice is safe.
 
-On Workday's work experience step, it also tidies each job's description that Workday copied from your resume: it joins lines broken in the middle of a sentence, puts back the first "•", and removes another section's heading or the next job's first line copied in at the end. The panel lists what it changed. A description it can't sort out is left as it is and listed as left.
+On Workday's work experience step, it also tidies each job's description that Workday copied from your resume: it joins lines broken in the middle of a sentence, puts back the first "•", and removes another section's heading or the next job's first line copied in at the end. The panel lists what it changed. A description it can't sort out is left as it is and listed as left. It also turns your phone number into the plain digits Workday's phone box takes when Workday copied it with a "+1" and brackets, and lists a job's company box that ends with that job's location.
 
 ## Use with Claude
 

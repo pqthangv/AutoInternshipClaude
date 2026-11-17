@@ -178,7 +178,8 @@
     // full, because the record should mention it and Claude can't see the whole box otherwise.
     if (tidied.length) {
       lines.push('', 'Tidied (the site copied these badly from the resume):', ...tidied.map((t) => {
-        const what = [t.removed && `removed "${cut(t.removed, 120)}"`, t.joined && `joined ${t.joined} broken line${t.joined > 1 ? 's' : ''}`];
+        const what = [t.removed && `removed "${cut(t.removed, 120)}"`, t.joined && `joined ${t.joined} broken line${t.joined > 1 ? 's' : ''}`,
+          t.now != null && `"${cut(t.was, 40)}" → "${cut(t.now, 40)}"`]; // the phone number's format (tidyPhone)
         return `- ${cut(t.label, 60)}: ${what.filter(Boolean).join('; ')}`;
       }));
     }
