@@ -16,7 +16,7 @@ browser as before. LinkedIn is never read.
 --profile screens each posting against the user's status, degree and availableFrom before anyone tailors for it:
 "skip" when it plainly rules the user out (excludes F-1 students or temporary visas, no CPT or OPT, permanent work
 authorization, citizenship, U.S. person status or a clearance the user can't have, a graduate-only role for an
-undergraduate, a set start date before availableFrom), "check" for
+undergraduate, a set start date before availableFrom, a posting the site says no longer exists), "check" for
 wording a person should judge, else "ok", with the sentences behind it. Sponsorship alone never skips: below
 senior year it doesn't stop an application (SKILL.md step 2). --move-skips (with --jobs) moves skipped lines
 below "# done" with the reason, so no batch picks them again. Batch 2026-11-08 spent $2.41 of $17.76 on four
@@ -40,8 +40,8 @@ needs no separate call. --jobs reads the links above the "# done" line, ignoring
 Why: opening a posting in the browser and reading the page costs several tool calls and a page of menus and
 scripts each time. This is one call for the whole queue, and the result is plain text.
 
-Prints one JSON object with a short summary per posting. Exit codes: 0 all fetched, 2 some need the browser
-(see each one's "error"), 1 bad input.
+Prints one JSON object with a short summary per posting. A closed posting has "closed": true and isn't counted
+in need_browser. Exit codes: 0 all fetched (or closed), 2 some need the browser (see each one's "error"), 1 bad input.
 """
 import argparse
 import datetime as dt
@@ -74,6 +74,12 @@ class Blocked(Failed):
         super().__init__(f"this computer's network doesn't allow {host}. Open it in the browser.")
 
 
+class Closed(Failed):
+    """The site says this posting no longer exists. With --profile it counts as a screen skip, so --move-skips
+    moves it below "# done" and no batch starts a tailoring agent for it: in the 2026-11-13 to 11-16 batches, ten
+    agents opened postings that had closed, one of them (ICF) after this script had already said "not found"."""
+
+
 # What to allow so every supported site works (see the "hint" in the output). Workday adds one host per company.
 ALLOW = ['boards.greenhouse.io', 'job-boards.greenhouse.io', 'boards-api.greenhouse.io', 'jobs.ashbyhq.com', 'api.ashbyhq.com',
          'api.lever.co', 'api.smartrecruiters.com', 'ats.rippling.com', '*.myworkdayjobs.com', '*.myworkdaysite.com', '*.oraclecloud.com',
@@ -88,7 +94,9 @@ GAP_SECONDS = 1.0
 _last_request = {}  # site -> when we last asked it
 
 
-def get(url, data=None, headers=None, raw=False):
+def get(url, data=None, headers=None, raw=False, gone=False):
+    """gone: this URL is the posting itself, so "not found" means it has closed. Not for lookups on the way to it:
+    Greenhouse's embed page answers 404 for some open postings (Jane Street's gh_jid links)."""
     host = urllib.parse.urlparse(url).netloc
     req = urllib.request.Request(url, data=data, headers={'User-Agent': USER_AGENT, 'Accept': 'application/json',
                                                           **(headers or {})})
@@ -113,9 +121,16 @@ def get(url, data=None, headers=None, raw=False):
                 time.sleep(min(int(after) if after.isdigit() else 5, 10))
                 continue
             if e.code in (404, 410):
+                if gone:
+                    raise Closed('closed: the site says this posting no longer exists.')
                 raise Failed('not found: the posting may have closed. Open it in the browser to check.')
             if e.code in (429, 503):
                 raise Failed('the site is limiting requests right now. Open it in the browser, or try again later.')
+            # Workday answers a removed posting with 403 and its own error code S22 ("permission denied"), not 404.
+            # Checked 2026-11-17: the five postings agents had found closed in the browser all gave S22; open ones
+            # gave 200 (or Cloudflare's 429 page, which says nothing about the posting).
+            if e.code == 403 and gone and '"S22"' in e.read().decode('utf-8', 'replace').replace(' ', ''):
+                raise Closed('closed: the site says this posting no longer exists.')
             if e.code in (401, 403):
                 raise Failed('the site refused the lookup (some sites block scripts). Open it in the browser.')
             raise Failed(f'the site answered {e.code}. Open it in the browser.')
@@ -196,6 +211,7 @@ def question(label, required, kind, options=None):
 
 def greenhouse(p):
     board = p['board']
+    from_link = bool(board)  # a board found through the embed page may be the wrong one, so its 404 proves nothing
     if not board:
         # Embedded and company-site links carry only the job's id. Greenhouse's own embed page redirects to a
         # link that names the board ("...?for=coinbase&token=...").
@@ -212,7 +228,7 @@ def greenhouse(p):
             board = m and m.group(1)
         if not board:
             raise Failed("couldn't tell which company's Greenhouse board this is. Open it in the browser.")
-    d = get(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{p['id']}?questions=true&pay_transparency=true")
+    d = get(f"https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{p['id']}?questions=true&pay_transparency=true", gone=from_link)
     pay, blurbs = [], []
     for r in d.get('pay_input_ranges') or []:
         lo, hi = r.get('min_cents'), r.get('max_cents')
@@ -295,7 +311,7 @@ def ashby(p):
 
 
 def lever(p):
-    d = get(f"https://{p['api']}/v0/postings/{p['company']}/{p['id']}")
+    d = get(f"https://{p['api']}/v0/postings/{p['company']}/{p['id']}", gone=True)
     cats = d.get('categories') or {}
     s = d.get('salaryRange') or {}
     pay = ''
@@ -321,7 +337,7 @@ def tidy_company(name):
 
 
 def workday(p):
-    d = get(f"https://{p['host']}/wday/cxs/{p['tenant']}/{p['site']}/job/{p['rest']}")
+    d = get(f"https://{p['host']}/wday/cxs/{p['tenant']}/{p['site']}/job/{p['rest']}", gone=True)
     i = d.get('jobPostingInfo') or {}
     if not i:
         raise Failed('not found: the posting may have closed. Open it in the browser to check.')
@@ -381,7 +397,7 @@ def oracle(p):
 
 
 def smartrecruiters(p):
-    d = get(f"https://api.smartrecruiters.com/v1/companies/{p['company']}/postings/{p['id']}")
+    d = get(f"https://api.smartrecruiters.com/v1/companies/{p['company']}/postings/{p['id']}", gone=True)
     loc = d.get('location') or {}
     where = loc.get('fullLocation') or ', '.join(x for x in (loc.get('city'), loc.get('region')) if x)
     where += ' (remote)' if loc.get('remote') else ' (hybrid)' if loc.get('hybrid') else ''
@@ -583,8 +599,8 @@ def parse(url):
     host, path = u.netloc.lower(), u.path
     q = urllib.parse.parse_qs(u.query)
     if host.endswith('greenhouse.io') or 'gh_jid' in q:
-        if '.eu.' in host:
-            return 'greenhouse', None  # EU boards have no public job API
+        # EU boards (job-boards.eu.greenhouse.io) are served by the same boards-api host: checked 2026-11-17 with
+        # IMC and Veeam postings, which batches had sent to the browser until then.
         m = re.match(r'/([^/]+)/jobs/(\d+)', path)
         if host.endswith('greenhouse.io') and m and m.group(1) != 'embed':
             return 'greenhouse', {'board': m.group(1), 'id': m.group(2)}
@@ -699,7 +715,8 @@ TRAINING_MAYBE = re.compile(r'\bother than\b|\bexcept\b')
 # "Requiring future sponsorship (for example, following F-1 OPT/CPT) are not eligible" is about sponsorship.
 FUTURE_SPONSOR = re.compile(r'\bsponsor\w*[^.]{0,80}\b(future|continued|following|extend\w*)\b|\b(future|continued)\b[^.]{0,40}\bsponsor')
 SHORT_HEADING = re.compile(r'^[^.]{0,60}:$|^\S+(\s+\S+){0,2}$')
-PERMANENT_AUTH = re.compile(r'\bpermanent\b[^.]{0,30}\b(work|employment)\s+authori[sz]ation\b|\bauthori[sz]ed to work permanently\b|\bpermanently authori[sz]ed\b')
+PERMANENT_AUTH = re.compile(r'\bpermanent\b[^.]{0,30}\b(work|employment)\s+authori[sz]ation\b|\bpermanently authori[sz]ed\b'
+                            r'|\bauthori[sz](ed|ation) to (work permanently|permanently work)\b')  # Koch: "Legal authorization to work permanently"
 PREFERRED_HEAD = re.compile(r'\b(prefer\w*|nice to have|bonus|pluses|desired|ideal\w*)\b', re.I)
 HEADING_WORDS = re.compile(r'\b(qualifications?|requirements?|skills|about|what you|who you|you will|you\'ll|we\'re looking|we are looking|'
                            r'responsibilit\w*|benefits|nice to have|bonus|preferred|minimum|basic|required|desired|eligibility|education)\b', re.I)
@@ -784,8 +801,10 @@ def dates_in(text, year):
 
 # A start date the posting sets: "must be available to start on May 17", "the program runs from May 26 to August 14",
 # "Internship program begins Monday, May 24, 2027". Not dates about applying, interviews, graduation or offers.
+# "This is a 10-week program, May 24th - July 30th" (Lowe's) names the program's dates without a start word.
 START_WORDS = re.compile(r'\b(start(s|ing)?|begin(s|ning)?|commenc(e|es|ing)|kicks? off|first day|report(ing)? date|runs from|'
-                         r'(program|internship|cohort) (runs|dates?|period|will run|takes place)|available (from|beginning))\b')
+                         r'(program|internship|cohort) (runs|dates?|period|will run|takes place)|available (from|beginning)|'
+                         r'\d{1,2}[- ]weeks? (summer )?(program|internship))\b')
 NOT_START = re.compile(r'\b(appl(y|ied|ying|ications?)|deadline|posted|interview\w*|clos(e|es|ing)|review(ed|ing)?|graduat\w*|offers?|'
                        r'decisions?|notif\w*|submi\w*|recruit\w*|career fair|info(rmation)? sessions?|webinars?|events?|salary|pay)\b')
 # "Interns may start as early as May 18" or "June 1 or later" sets no limit on a later start.
@@ -1176,10 +1195,17 @@ def main():
             item.update({'ok': False, 'error': str(e)})
             if isinstance(e, Blocked):
                 blocked.add(e.host)
+            if isinstance(e, Closed):
+                item['closed'] = True
+                if status:  # a screen skip like any other: --move-skips moves it, and no agent opens it
+                    item['screen'], item['screen_why'] = 'skip', ['posting closed: the site says it no longer exists']
         results.append(item)
 
-    failed = sum(1 for r in results if not r['ok'])
-    out = {'ok': not failed, 'fetched': len(results) - failed, 'need_browser': failed}
+    closed = sum(1 for r in results if r.get('closed'))
+    failed = sum(1 for r in results if not r['ok']) - closed
+    out = {'ok': not failed, 'fetched': len(results) - failed - closed, 'need_browser': failed}
+    if closed:
+        out['closed'] = closed
     if status:
         out['screen'] = {v: sum(1 for r in results if r.get('screen') == v) for v in ('ok', 'check', 'skip')}
         if a.move_skips and a.jobs:
