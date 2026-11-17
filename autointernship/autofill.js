@@ -2,8 +2,8 @@
    Injected into the current tab only when you click "Fill this page", press the shortcut, or
    (if you turned it on) Claude asks through the bridge (bridge.js).
    It reads your profile from chrome.storage.local, fills the fields it recognizes, never
-   overwrites anything that already has a value (except tidying work descriptions Workday copied
-   badly from your resume, see tidyDescription), and outlines fields on the page:
+   overwrites anything that already has a value (except tidying work descriptions and the phone number
+   Workday copied badly from your resume, see tidyDescription and tidyPhone), and outlines fields on the page:
      solid green  = filled from your profile
      dashed amber = still empty, for you or Claude
    fill() also returns a report for Claude: each field it filled with the value now on the page,
@@ -949,6 +949,50 @@
     return true;
   }
 
+  // Workday's "Autofill with Resume" also types the phone as the resume prints it ("+1 (669) 649-2989") into
+  // the Phone Number box, which sits beside Workday's own country-code list, and Workday then refuses it on
+  // Save and Continue: Claude retyped the digits by hand on about 11 forms in the 2026-11-13 to 11-16 batches.
+  // So this box gets digits only, both when the fill types it and when the parse filled it with the same
+  // number. Only Workday's box, whose id says what it is.
+  const WORKDAY_PHONE = /^phoneNumber--phoneNumber$/;
+  // The number without its country code, or null when that can't be told (another country's "+" code):
+  // then the box keeps what it's given, as before.
+  function phoneDigits(phone) {
+    const s = String(phone || '').trim();
+    const d = s.replace(/\D/g, '');
+    if (d.length === 10 && !s.startsWith('+')) return d;
+    if (d.length === 11 && d.startsWith('1')) return d.slice(1); // "+1 669 ...", "1-669-..."
+    return null;
+  }
+
+  // True when the box held the profile's number in another format and now holds its digits.
+  function tidyPhone(el, raw, p, stats) {
+    const want = phoneDigits(p.phone);
+    const was = String(el.value || '').trim();
+    const got = was.replace(/\D/g, '');
+    // The same number only: its digits, maybe after a country code. A different number is never touched.
+    if (!want || was === want || !got.endsWith(want) || got.length - want.length > 3) return false;
+    setValue(el, want);
+    if (String(el.value) !== want) return false; // the box kept its value: reported as Already filled
+    mark(el, 'filled');
+    stats.tidied.push({ label: tidy(raw), was, now: want });
+    return true;
+  }
+
+  // Workday's parse sometimes runs a job's location into its Company box ("GreenShield Central Vietnam", with
+  // "Central Vietnam" in that entry's Location box): 9 forms in the same batches, each noticed only on the
+  // review page. Left for Claude with the likely name rather than cut here, since a company's own name can end
+  // with its city ("The Bank of New York" in New York).
+  const WORK_COMPANY = /^workExperience-\d+--companyName$/;
+  function companyWithLocation(el) {
+    const where = document.getElementById(el.id.replace(/companyName$/, 'location'));
+    const loc = where ? String(where.value || '').trim() : '';
+    const now = String(el.value || '').trim();
+    if (loc.length < 3 || !now.toLowerCase().endsWith(' ' + loc.toLowerCase())) return null;
+    const rest = now.slice(0, now.length - loc.length).replace(/[\s,;|–-]+$/, '');
+    return rest ? `ends with this entry's location "${loc}": check it against the resume (without it: "${rest}")` : null;
+  }
+
   /* ---------- Outlines ---------- */
 
   const listeners = new WeakMap();
@@ -1011,6 +1055,7 @@
   //                                                             note says why when the kind doesn't
   //   stats.tidied:    [{ label, removed, joined }]             a work description the site copied badly
   //                                                             from the resume, tidied (see tidyDescription)
+  //                    [{ label, was, now }]                   Workday's phone box, digits only (tidyPhone)
   //
   // profile is set when a name box holds something other than your profile's name. Sites' resume parsers
   // often split a two-word first name ("Mei Ling Chen" → first "Mei", last "Ling Chen"), and the fill never
@@ -1557,10 +1602,19 @@
       }
 
       const kind = tag === 'SELECT' ? 'select' : tag === 'TEXTAREA' ? 'textarea' : 'text';
-      const res = answerFor(p, label, hints, el, kind, counters); // runs first so job/school order stays right
+      let res = answerFor(p, label, hints, el, kind, counters); // runs first so job/school order stays right
       const role = kind === 'textarea' && ROLE_DESCRIPTION.test(el.id) ? ++roles : 0;
       if (role && hasValue(el) && tidyRoleDescription(el, raw, role, stats)) continue;
-      if (hasValue(el)) { // never overwrite (Workday's copied work descriptions aside, just above)
+      if (WORKDAY_PHONE.test(el.id || '')) {
+        if (hasValue(el) && tidyPhone(el, raw, p, stats)) continue;
+        const want = phoneDigits(p.phone);
+        if (want && res && !res.yesno && phoneDigits(res.value) === want) res = { ...res, value: want };
+      }
+      if (kind === 'text' && WORK_COMPANY.test(el.id || '') && hasValue(el)) {
+        const note = companyWithLocation(el);
+        if (note) { noteLeft(el, stats, entryLabel(el, raw), 'text', { note }); continue; }
+      }
+      if (hasValue(el)) { // never overwrite (Workday's copied work descriptions and phone format aside, just above)
         notePrefilled(stats, raw, kind === 'select' ? el.options[el.selectedIndex].text : el.value, res && res.rule && res.rule.name ? res.value : null);
         continue;
       }

@@ -10,7 +10,7 @@ function showResult(r) {
   const notes = [];
   const tidied = (r.tidied || []).length;
   if (r.resume) notes.push(`Attached ${r.resume}.`);
-  if (tidied) notes.push(`Tidied ${count(tidied, 'work description', 'work descriptions')} the site copied badly from your resume.`);
+  if (tidied) notes.push(`Tidied ${count(tidied, 'box', 'boxes')} the site copied badly from your resume.`);
   if (!r.filled && !r.left && !tidied) notes.push('No form fields found here. If the form opens in a pop-up, open it first, then fill again.');
   else if (r.left) notes.push('Fill the amber fields yourself, or let Claude finish them.');
   $('#note').textContent = notes.join(' ');
