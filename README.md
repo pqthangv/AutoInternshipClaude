@@ -1,6 +1,6 @@
 # AutoInternshipClaude
 
-Two Claude skills and a Chrome extension for internship applications. They find postings, tailor a one-page resume to each one, fill the form and track every application. By default you review and click submit yourself. You can also ask Claude to fill everything (consent boxes and signature included), or to submit for you.
+Two Claude skills and a Chrome extension for internship applications. They find postings, tailor a one-page resume to each one, fill the form and track every application. By default you review and click submit yourself. You can also ask Claude to fill everything (consent boxes and signature included), or to submit for you. It's cheap and fast enough for 400 applications in 4 days.
 
 | Part | What it does |
 |---|---|
