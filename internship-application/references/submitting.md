@@ -64,4 +64,4 @@ If any check fails, don't submit. Stop as in Fill all, and put the failed check 
 
 ### Batch runs
 
-With subagents (`references/batch.md`), they fill and run the check; you click Submit yourself. Report one line per posting: submitted (with the time), or stopped and why.
+With subagents (`references/batch.md`), they fill and run the check; you click Submit yourself, without re-checking or changing the page. When Submit was turned on after filling began, a check subagent runs the check (batch.md, step 7). Report one line per posting: submitted (with the time), or stopped and why.

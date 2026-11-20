@@ -4,8 +4,8 @@ Read this when the user asks to work through jobs.txt or gives several links.
 
 Use the subagent tool (Task or Agent, type `general-purpose`). Without one, follow "Without subagents" at the end.
 
-- **Keep this conversation small.** Never fill forms or read form pages here. Your only browser work is making the tab group and, in Submit mode, clicking Submit.
-- **Models.** Start filling subagents with the `sonnet` model when your subagent tool lets you choose (steps 4 and 6). Tailoring subagents keep the default model.
+- **Keep this conversation small.** Never fill, fix, check or read a form page here: not one field, not when the user says "fill Northwind", not when a subagent couldn't read the form. Start one new filling subagent for it (step 6); if that one can't read the form either, it's `Needs you`. Your only browser work is making the tab group, opening sign-in tabs (step 2), and in Submit mode clicking Submit and closing submitted tabs (step 7).
+- **Models.** Start filling and check subagents with the `sonnet` model when your subagent tool lets you choose (steps 4, 6 and 7). Tailoring subagents keep the default model.
 - **No wakeups, no advisor.** Never schedule a wakeup, loop or cron job (ScheduleWakeup, CronCreate, /loop): each subagent tells you when it finishes. Never call the advisor tool; both prompts below say the same.
 
 ## The run
@@ -14,11 +14,13 @@ Use the subagent tool (Task or Agent, type `general-purpose`). Without one, foll
 
    For links the user gave instead of jobs.txt, fetch those links (SKILL.md, "Batch runs"), log the ones the screen marks `skip` as `Skipped` and take the rest; the queue's limits don't apply to them. If the user asks for more from one company ("all the Northwind roles"), pass those links this way. When they ask for more from one iCIMS site, tell them the rest come in the next batch.
 2. **Tailor**: one subagent per posting with the tailoring prompt. Start the first one alone and all the rest in your next message (all in one message if your subagent tool waits for each to finish). Postings the fetch couldn't get are read in the browser, so follow "Sharing the browser" for those. Don't read tailoring.md, overleaf.md or the master yourself.
+
+   **Sign-ins while they work.** Then open one tab per site among the picks that needs an account, at its sign-in page: for Workday, the posting's address cut after the site's name, plus `/login` (`https://northwind.wd5.myworkdayjobs.com/en-US/External/login`); for iCIMS, `https://<host>/jobs/<id>/login?mobile=true&needsRedirect=false`. Don't read those pages. Tell the user in one message, without waiting for an answer: the tabs (company and site), to sign in or create an account there (their browser's password manager can save the password) and then leave the tab without uploading or filling anything, and that you're carrying on meanwhile.
 3. **Checkpoint** (step 4) from the summaries, one short block per posting. Read a drafts file only to show its answers, and not at all in auto mode. Add one line for the `held` postings (company: role, and why), so the user can swap one in or say to do them all; in auto mode they stay held.
-4. **Fill**: one subagent per application with the filling prompt, all at once, following "Sharing the browser". Start the first one alone, then every other one not queued behind a sign-in in your next message (as in step 2), and each queued one when the form ahead of it replies (or in the next message, if your subagent tool waits for all). If they reply NO BROWSER, fill them all yourself, as in "Without subagents".
+4. **Fill**: one subagent per application with the filling prompt, all at once, following "Sharing the browser". Start the first one alone, then every other one not queued behind a sign-in in your next message (as in step 2), and each queued one when the form ahead of it replies (or in the next message, if your subagent tool waits for all). The first form on a site with a sign-in tab from step 2 gets `Tab: continue in tab <id>: the user was asked to sign in there`. If they reply NO BROWSER, fill them all yourself, as in "Without subagents".
 5. **Hand-off**: one message for the whole batch: one line per tab (company and role, and what's needed: "sign in to Workday", "attach C:\\...\\Maya_Chen_Resume_Northwind.pdf"), then the questions from every form, grouped so one answer covers every form that asks it. Before sending, check each question against profile.json yourself (every field and `savedAnswers`, by meaning); for the ones it answers, start that application's step 6 subagent right away instead of asking. Sponsorship follows filling.md's "Sponsorship" line: a question about this internship only takes `needsSponsorshipForInternship` when it's set, over any saved answer. In Submit mode without auto, also show the written answers the subagents drafted on the form (each record's "Written answers"); send this message even when nothing else needs the user, and wait.
 6. **Continue**: when the user is done, start a new filling subagent for each application with the filling prompt, all at once as in step 4, with what the user did and their answers. Each continues from its application-record.md in the same tab. Repeat once if new steps came up. Never send a subagent a message (SendMessage), running or finished: everything goes into a new filling prompt. When the user changes a rule for the batch or approves something ("you can click Save and Continue on Self Identify", "yes, tick them"), write it into each new filling prompt as a line after `Mode:` ("The user said: ..."). Never send a subagent back from Workday's review page to change work entries (filling.md, "Filling the form"); put what's wrong in the report.
-7. **Submit** (Submit mode only): do it yourself, never in a subagent. For each application whose check passed (or failed only on check 3, written answers, which the user has since seen and accepted), switch to its tab, confirm it's on the review page, and follow "Submitting" in submitting.md.
+7. **Submit** (Submit mode only): only you click Submit, never a subagent. Take each reply's `Submit check:` as it is; never re-check, read or change the page yourself. If the user turned on Submit after the filling subagents started, they ran no check: start one check subagent per application on its last page before Submit, with the check prompt, all at once. For each application whose check passed (or failed only on check 3, written answers, which the user has since seen and accepted), switch to its tab. Its address (in the tab list your browser calls return) must still be the one the reply gave (`Tab:` or `Page:`); if it changed (a sign-in page, a reload), don't click: start a new check subagent. Then `find` the Submit button and follow "Submitting" in submitting.md, checking the confirmation with `find`. A failed check, or an answer that looks wrong, goes to a new filling subagent (step 6) with what to fix, then a new check subagent. Close each tab once its submission is confirmed and recorded.
 8. **Report** once, one line per posting (step 8); for one the site sent early, say what wasn't filled. Move processed links in jobs.txt below `# done`, editing in place. Held postings get one line together at the end ("Held: Company Role (2 per company), ...") and stay above `# done`. Postings the pick moved get one line too ("Moved below # done: 3 closed, 2 not software or data roles, ..."). Save the answers listed under `To save:` to profile.json without asking (`references/profile.md`) and say in one line what you saved. If profile.json changed in this batch, or any reply's `Extension answers:` is lower than its number of `savedAnswers`, add: "In the AutoInternship extension, open the profile page, click **Restore from backup** and choose <folder>/profile.json, so the Fill button uses the new answers." End with one line telling the user to start a new conversation for the next batch.
 
 A posting with a wall the user can't clear in the hand-off (a broken page, a closed posting, an assessment) is `Needs you`; move on.
@@ -29,7 +31,7 @@ A posting with a wall the user can't clear in the hand-off (a broken page, a clo
 - **No limit on how many at once**, except the queueing below. If the user asks for a limit, use their number.
 - **One at a time per sign-in.** Never run two forms at once on the same account: two on one Workday site (such as `northwind.wd5.myworkdayjobs.com`) or two on one company's careers site. Queue the second behind the first. Greenhouse, Lever and Ashby forms for different companies can run at the same time.
 - **If they get in each other's way** (two subagents report failing screenshots, clicks that didn't take, or a missing tab), let the running ones finish, then fill the rest one at a time.
-- **If the tab group disappears**, each running subagent stops with `stopped: tab group lost`. Wait for the rest, make the group again, and start a new subagent for each with the filling prompt and the third kind of `Tab:` line. Never fill from the start.
+- **If the tab group disappears**, each running subagent stops with `stopped: tab group lost`. Wait for the rest, make the group again, and start a new subagent for each with the filling prompt and the `Tab:` line for a lost tab group. Never fill from the start.
 
 ## Tailoring prompt
 
@@ -117,7 +119,8 @@ as a call of its own, never inside a batch.
 - Job folder: <folder>  Application link: <url; the fetch's apply_url when it has one>  Resume: <PDF path>  Answers: <drafts file, or none>
 - Cover letter: <letter path and cover-letter.txt path (and the combined PDF's), or none>  Master resume: <path>
 - Profile: <folder>/profile.json  Tracker: <folder>/tracker.xlsx
-- Tab: <open a new tab of your own | continue in tab <id>: the user has since <what they did>, and answered: <answers>
+- Tab: <open a new tab of your own | continue in tab <id>: the user was asked to sign in there
+  | continue in tab <id>: the user has since <what they did>, and answered: <answers>
   | open a new tab of your own and continue from application-record.md: the tab group was lost>
 The browser tools (claude-in-chrome) may be deferred: load them with your tool search first. Only if none
 exist after that, stop and reply only "NO BROWSER".
@@ -135,6 +138,28 @@ Agreed for you: <short list, or none>
 To save: <answers the user gave that will come up again, for profile.json, or none>
 Extension answers: <N from "Profile: N saved answers." in the Fill report, or none>
 Submit check: <passed | failed: which> (Submit mode only)
+```
+
+## Check prompt
+
+For step 7, when the filling subagents ran without the check.
+
+```
+You're checking one internship application before Submit, in a batch run by the internship-application skill.
+Read "The check before Submit" in <skill>/references/submitting.md with your file-reading tool, not cat. You don't
+need other files from the skill. The form is in tab <id>, on its last page before Submit (iCIMS: the final form of
+its last step). Read that page with get_page_text and find (one screenshot at most), the job folder's
+application-record.md, job-posting.md and resume file name, and the profile, then run all seven checks (check 5
+against the profile and the master resume; check 6:
+python <skill>/scripts/tracker.py find "<folder>/tracker.xlsx" --company "<Company>").
+Change nothing on the page, never click Submit or any button that leaves the page, and pass your tab's id on every
+browser action without using any other tab. Don't start subagents of your own or call the advisor tool.
+- Job folder: <folder>  Tab: <id>  The user saw the written answers: <yes | no | auto>
+- Profile: <folder>/profile.json  Master resume: <path>
+The browser tools (claude-in-chrome) may be deferred: load them with your tool search first.
+Reply with only these lines:
+Submit check: passed | failed: <which checks, and what's wrong>
+Page: <the tab's address, the page's heading, and the Submit button's label>
 ```
 
 ## Without subagents
