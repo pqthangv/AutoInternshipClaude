@@ -20,11 +20,12 @@ often answer 410), Amazon, TikTok and ByteDance pages, and any page with a schem
 Eightfold, Paylocity). Anything else, or a lookup that fails, is reported so that posting can be opened in the
 browser as before. LinkedIn is never read.
 
---profile screens each posting against the user's status, degree and availableFrom before anyone tailors for it:
+--profile screens each posting against the user's status, degree and availability before anyone tailors for it:
 "skip" when it plainly rules the user out (excludes F-1 students or temporary visas, no CPT or OPT, permanent work
 authorization, citizenship, U.S. person status or a clearance the user can't have, a graduate-only role for an
-undergraduate, a set start date before availableFrom, a posting the site says no longer exists), "check" for
-wording a person should judge, else "ok", with the sentences behind it. Sponsorship alone never skips: below
+undergraduate, a set start date before availableFrom, in the text or as work months in the title, a posting the
+site says no longer exists), "check" for wording a person should judge (a minimum length longer than availableFrom
+to availableUntil among them), else "ok", with the sentences behind it. Sponsorship alone never skips: below
 senior year it doesn't stop an application (SKILL.md step 2). --move-skips (with --jobs) moves skipped lines
 below "# done" with the reason, so no batch picks them again. Batch 2026-11-08 spent $2.41 of $17.76 on four
 tailoring agents for postings that were then skipped.
@@ -547,10 +548,18 @@ def icims_behind(url, body):
     return icims_apply(*pick[0]) if len(pick) == 1 else None
 
 
+# A closed posting's page on a SuccessFactors career site (jobs.<company>.com/job/...?ats=successfactors). Open ones
+# carry the description in class="jobdescription" and never this line (PACCAR closed ×2, Westinghouse and NextEra
+# open, 2026-11-20).
+CLOSED_PAGE = re.compile(r'\bThis job is currently unposted\b', re.I)
+
+
 def other(p):
     """A site without a reader of its own: its page's JobPosting data, if it has one."""
     final, body = page(p['url'])
     j = json_ld_posting(body)
+    if not j and CLOSED_PAGE.search(body):
+        raise Closed('closed: the site says this posting no longer exists.')
     if not j:
         raise Failed('not a site with public job data here. Open it in the browser.')
     d = from_json_ld(j, final)
@@ -789,11 +798,15 @@ def user_status(prof):
     year = int(term.group(2)) if term else dt.date.today().year
     avail = str(prof.get('availableFrom') or '').strip()
     days = dates_in(avail, year)
+    until = str(prof.get('availableUntil') or '').strip()
+    ends = dates_in(until, year)
     return {'citizen': citizen, 'permanent': bool(re.search(r'green card|permanent resident|\blpr\b', auth)),
             'visa': visa.group(0).upper().replace(' ', '-') if visa else '', 'degree': degree_level(degree),
             'below_senior': below_senior(prof, term.group(0) if term else 'Summer 2027'), 'sponsor': prof.get('needsSponsorship') == 'yes',
             # the earliest day the user can start: a month alone ("June 2027") means its first day
             'available_from': days[0][2] if days else None, 'available_text': avail, 'year': days[0][2].year if days else year,
+            # the last day the user can work: a month alone ("August 2027") means its last day
+            'available_until': ends[-1][3] if ends else None, 'available_until_text': until,
             'season': term.group(1).lower() if term else None}
 
 
@@ -803,7 +816,9 @@ MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oc
 DATE_WORDS = re.compile(r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|'
                         r'nov(?:ember)?|dec(?:ember)?)\.?(?:\s+(\d{1,2})(?:st|nd|rd|th)?\b)?(?:,?\s+(20\d{2}))?\b'
                         r'|\b(\d{1,2})/(\d{1,2})/(20\d{2})\b', re.I)
-MONTH_ONLY_AFTER = re.compile(r'\b(in|on|of|from|by|early|mid|late|beginning|end|starting|beginning in|through|until)\s*-?\s*$')
+# ...or after a colon ("Work Period: May through August", SharkNinja 2026-11-20), unless it's the verb ("Start date: may vary").
+MONTH_ONLY_AFTER = re.compile(r'(\b(in|on|of|from|by|early|mid|late|beginning|end|starting|beginning in|through|until)|:)\s*-?\s*$')
+MAY_VERB = re.compile(r'\s+(vary|be|change|differ|depend|include|require|apply|also|not|have|need|work|start|begin)\b')
 # "May/June", "May or June", "June and July": a month right after another date in a list
 MONTH_LISTED = re.compile(r'(\/|\b(or|and|to|through)\s+((early|mid|late)\s*-?\s*)?)$')
 
@@ -822,6 +837,8 @@ def dates_in(text, year):
             listed = out and m.start() - out[-1][1] <= 14 and MONTH_LISTED.search(before)
             if day is None and not m.group(3) and not MONTH_ONLY_AFTER.search(before) and not listed:
                 continue
+            if day is None and not m.group(3) and m.group(1).lower() == 'may' and before.rstrip().endswith(':') and MAY_VERB.match(text, m.end()):
+                continue
             if not m.group(3):
                 # "May/June 2027": the year after the list belongs to every month in it
                 later = re.match(r'\s*(\/|or|and|to|through|-|–)\s*[a-z]+\.?(\s+\d{1,2}\w*)?,?\s+(20\d{2})', text[m.end():])
@@ -839,7 +856,7 @@ def dates_in(text, year):
 # "Internship program begins Monday, May 24, 2027". Not dates about applying, interviews, graduation or offers.
 # "This is a 10-week program, May 24th - July 30th" (Lowe's) names the program's dates without a start word.
 START_WORDS = re.compile(r'\b(start(s|ing)?|begin(s|ning)?|commenc(e|es|ing)|kicks? off|first day|report(ing)? date|runs from|'
-                         r'(program|internship|cohort) (runs|dates?|period|will run|takes place)|available (from|beginning)|'
+                         r'(program|internship|cohort) (runs|dates?|period|will run|takes place)|work (period|dates?)|available (from|beginning)|'
                          r'\d{1,2}[- ]weeks? (summer )?(program|internship))\b')
 NOT_START = re.compile(r'\b(appl(y|ied|ying|ications?)|deadline|posted|interview\w*|clos(e|es|ing)|review(ed|ing)?|graduat\w*|offers?|'
                        r'decisions?|notif\w*|submi\w*|recruit\w*|career fair|info(rmation)? sessions?|webinars?|events?|salary|pay)\b')
@@ -879,7 +896,52 @@ def early_start(low, st):
     return 'check' if START_HEDGE.search(plain) else 'skip'
 
 
-REQUIRED_HEAD = re.compile(r'\b(required|requirements|minimum|basic|must have|what you need|you must|eligibility)\b', re.I)
+# Work months in a title: "Data Science Intern (May to August)", "... Intern - May-Aug 2027" (SharkNinja, 2026-11-20,
+# whose posting text says only "Work Period: May through August").
+MONTH_NAME = (r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|'
+              r'oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)')
+TITLE_MONTHS = re.compile(rf'\b{MONTH_NAME}\.?\s*(?:-|–|—|to|through|thru)\s*{MONTH_NAME}\b')
+
+
+def title_early(title, st):
+    """early_start() on the work months a title names, else None."""
+    m = TITLE_MONTHS.search(undotted(str(title or '')).lower())
+    return early_start(f'runs from {m.group(1)} to {m.group(2)}', st) if m else None
+
+
+# A length the user's window (availableFrom to availableUntil) is too short for: "Available for a 4+ month co-op"
+# (Analog Devices, 2026-11-20), "a minimum of 6 months", "(8 months/40 hours per week)" in a title (Bosch, Rockwell).
+# A range counts from its low end ("6 months - 8 months", "4-8 months"). Only ever a check: the user may be able to
+# stay longer.
+LENGTH = re.compile(r'(?<![\d.])\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|twelve)\s*(?:(?:-|–|to)\s*\d{1,2}\s*)?(\+)?\s*-?\s*'
+                    r'(months?|mos?|weeks?|wks?)\b')  # not the 5 of "2.5-3 months" (Domino)
+LENGTH_WHAT = re.compile(r'\b(co-?ops?|internships?|program|assignment|rotation|placement)\b')
+LENGTH_NEED = re.compile(r'\+|\b(at least|minimum|min|available|availability|commit\w*|must|required?|requires|lasts?|duration|length)\b')
+# "6 months of experience", "within 6 months", "a 6-month period", "6 months remaining in your program",
+# "6+ months demonstrated internship or project work" (SpaceX), "at least four months post-internship" (Intuit)
+LENGTH_AFTER_NOT = re.compile(r'\s*(of|ago|after|before|prior|following|probation\w*|notice|period|old|remaining|left|until|from|'
+                              r'post|demonstrated|experience|exposure)\b')
+LENGTH_BEFORE_NOT = re.compile(r'\b(within|every|per|last|past|next|first|in the)\s*$')
+
+
+def too_long(text, st, title=False):
+    """'N months' (or weeks) when the text sets a length longer than the user's available window, else None."""
+    first, last = st.get('available_from'), st.get('available_until')
+    if not first or not last or (not title and not (LENGTH_WHAT.search(text) and LENGTH_NEED.search(text))):
+        return None
+    if not title and re.search(r'\bgraduat', text):  # "a graduation date ... at least four months post-internship"
+        return None
+    for m in LENGTH.finditer(text):
+        if not title and (LENGTH_AFTER_NOT.match(text, m.end()) or LENGTH_BEFORE_NOT.search(text[:m.start()])):
+            continue
+        n = WORD_NUM.get(m.group(1)) or int(m.group(1))
+        months = m.group(3).startswith('mo')
+        if n * (30 if months else 7) > (last - first).days + 8:  # a week's slack: "4 months" isn't 4 x 30 days exactly
+            return f"{n}{'+' if m.group(2) else ''} {'months' if months else 'weeks'}"
+    return None
+
+
+REQUIRED_HEAD =re.compile(r'\b(required|requirements|minimum|basic|must have|what you need|you must|eligibility)\b', re.I)
 
 
 def sentences(text):
@@ -919,6 +981,12 @@ def screen(p, st):
     title = undotted(p['role'] or '').lower()
     if undergrad and GRAD_ONLY.search(title) and not UNDERGRAD.search(title):
         hits.append(('skip', 'graduate-only role', p['role']))
+    early = title_early(p['role'], st)
+    if early:
+        hits.append((early, f"starts before {st['available_text']}", p['role']))
+    length = too_long(title, st, title=True)
+    if length:
+        hits.append(('check', f"lasts {length}, longer than {st['available_text']} to {st['available_until_text']}", p['role']))
 
     prev = ''
     for s, preferred, required in sentences(html.unescape(p['description'] or '')):  # some job data is escaped twice ("&#xa;")
@@ -983,6 +1051,9 @@ def screen(p, st):
         early = early_start(low, st)
         if early:
             hits.append((early, f"starts before {st['available_text']}", s))
+        length = too_long(low, st)
+        if length:
+            hits.append(('check', f"lasts {length}, longer than {st['available_text']} to {st['available_until_text']}", s))
         # Under a "Preferred" heading only a degree line is plainly a preference; an export-control or citizenship
         # paragraph at the end of a posting often has no heading of its own, so it becomes a check, not a skip.
         if preferred and len(hits) > before and hits[-1][0] == 'skip':
@@ -1118,6 +1189,11 @@ def as_markdown(url, site, p):
     return '\n'.join(lines) + '\n'
 
 
+def role_key(title):
+    """A title without its term ("Software Engineer Intern - Summer 2027" is "software engineer intern")."""
+    return ' '.join(w for w in norm(title).split() if not re.fullmatch(r'20\d\d|summer|fall|autumn|winter|spring', w))
+
+
 def file_name(n, p):
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', f"{n:02d} {p['company']} - {p['role']}")
     return re.sub(r'\s+', ' ', name).strip()[:90].rstrip(' .') + '.md'
@@ -1193,6 +1269,14 @@ def fetch_item(n, url, out_dir, status, rows, blocked):
             if same or hits:
                 item['in_tracker'] = [{k: r.get(k) for k in ('id', 'role', 'status', 'date_added')} for r in {r['id']: r for r in same + hits}.values()]
                 item['same_posting_in_tracker'] = bool(hits)
+                # The same title at the company under another link and another note title: Shield AI's "June 2027
+                # Co-Op - Software Engineer Intern" moved from Lever to Ashby, and a list called it "Software Engineer Intern Co-op".
+                # Skipped rows don't count: a closed posting's repost is worth screening again. The company has to be
+                # the same by whole words (same_company): `same` above lets "HP" match "HPE".
+                role = role_key(p['role'])
+                if role and any(same_company(r.get('company'), p['company']) and role_key(r.get('role')) == role
+                                and str(r.get('status') or '').strip().lower() != 'skipped' for r in same):
+                    item['same_role_in_tracker'] = True
     except Failed as e:
         p = None
         item.update({'ok': False, 'error': str(e)})
@@ -1380,7 +1464,13 @@ def pick_batch(a, status, rows, tracker_note):
         if title and fi.other_term(title, url, term):
             moved[i] = 'the title names another term'
             continue
-        lim = next((re.match(r'held: limit (\d+)(?: per (\d+) days)?', h) for h in holds if h.startswith('held: limit')), None)
+        if title and fi.not_internship(title, term):
+            moved[i] = 'not an internship'
+            continue
+        if title and title_early(title, status) == 'skip':
+            moved[i] = f"starts before {status['available_text']}"
+            continue
+        lim =next((re.match(r'held: limit (\d+)(?: per (\d+) days)?', h) for h in holds if h.startswith('held: limit')), None)
         if lim and company and applied_count(rows, company, int(lim.group(2)) if lim.group(2) else None) >= int(lim.group(1)):
             held.append(f'{who} (its posting allows {lim.group(1)} applications)')  # recounted from the tracker, not fetched again
             continue
@@ -1402,7 +1492,7 @@ def pick_batch(a, status, rows, tracker_note):
         if item.get('screen') == 'skip':
             moved[i] = item['screen_why'][0].split(':')[0]
             continue
-        if item.get('same_posting_in_tracker'):
+        if item.get('same_posting_in_tracker') or item.get('same_role_in_tracker'):
             moved[i] = 'already in the tracker'
             continue
         name = company or (p or {}).get('company') or ''
@@ -1412,6 +1502,9 @@ def pick_batch(a, status, rows, tracker_note):
                 continue
             if fi.other_term(p['role'], url, term):
                 moved[i] = 'the title names another term'
+                continue
+            if fi.not_internship(p['role'], term):
+                moved[i] = 'not an internship'
                 continue
             if fi.skip_listed(p['company'], skips):
                 passed['on your skip list'] = passed.get('on your skip list', 0) + 1
