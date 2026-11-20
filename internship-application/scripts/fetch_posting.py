@@ -9,7 +9,8 @@ Usage:
 --pick goes down the queue until N postings are ready for one batch: it passes over lines the user held or whose
 company is in profile.json's skipCompanies, moves screen skips and titles of other kinds of role (roleTypes) or
 another term below "# done", and holds a third posting from one company, a second from one iCIMS site, and one
-past an application limit its company states. See pick_batch().
+past an application limit its company states. The same call again on the same day refills a batch whose postings
+dropped out later: it passes over what the earlier calls picked and counts them toward the limits. See pick_batch().
 
 Supported: Greenhouse (job boards, embedded forms, and company career pages with ?gh_jid=), Ashby, Lever,
 Workday (myworkdayjobs.com and myworkdaysite.com), SmartRecruiters, Rippling and Oracle (oraclecloud.com). On
@@ -1249,8 +1250,16 @@ def apply_limit(description):
 
 
 # Tags the picker writes into a line's note, and rewrites on every run. Any other "held:" is the user's.
+# A pick from a company page names its iCIMS site ("picked 2026-11-20 iCIMS careers-northwind.icims.com"): the link
+# doesn't show it, and a refill later that day must not take a second posting from that site.
 AUTO_HELD = re.compile(r'\s*\|\s*held: (?:2 per company|one per iCIMS site|limit \d+(?: per \d+ days)?)(?=\s*(?:\||$))')
-PICKED = re.compile(r'\s*\|\s*picked \d{4}-\d{2}-\d{2}(?=\s*(?:\||$))')
+PICKED = re.compile(r'\s*\|\s*picked \d{4}-\d{2}-\d{2}(?: iCIMS [^\s|]+)?(?=\s*(?:\||$))')
+PICKED_PART = re.compile(r'picked (\d{4}-\d{2}-\d{2})(?: iCIMS (\S+))?$')
+
+
+def picked_on(parts, day):
+    """The note part that says the line was picked on `day`, as a match (its group 2 is the iCIMS site), else None."""
+    return next((m for m in map(PICKED_PART.match, parts) if m and m.group(1) == day), None)
 
 
 def same_company(a, b):
@@ -1290,6 +1299,11 @@ def pick_batch(a, status, rows, tracker_note):
     minutes). Here each of those is decided before fetching, and the fetch stops at a.pick postings, so one call
     gives the batch. Postings the site wouldn't serve (Workday's 429s) count as picks: their own subagent reads
     them in the browser. Screen checks come extra, for the caller to judge.
+
+    Picks still drop out after this (unread postings that turn out closed, a rule only the full posting shows), so
+    a batch calls again with the number missing. On 2026-11-20, when a second call wasn't allowed, batches of 6, 6
+    and 10 went ahead with 4, 2 and 4. A later call that day passes over the lines the earlier ones marked, counts
+    them toward the caps, and numbers its files and `order` after the earlier calls' (kept in out_dir).
     """
     sys.path.insert(0, HERE)
     import find_internships as fi
@@ -1306,7 +1320,16 @@ def pick_batch(a, status, rows, tracker_note):
     changed, moved, held, passed = {}, {}, [], {}
     picks, judge, taken, hosts, blocked = [], [], [], set(), set()
     attempts, ceiling = 0, max(15, 4 * a.pick)
+    # A refill writes into the same folder: number after what's there, so its files and `order` follow the first
+    # call's. Unread and closed postings take a number but write no file, so the last number is kept in a file too.
+    counter = os.path.join(a.out_dir, '.pick-number')
+    try:
+        last = int(open(counter, encoding='utf-8').read().strip() or 0)
+    except (OSError, ValueError):
+        last = 0
+    start = max([last] + [int(m.group(1)) for f in os.listdir(a.out_dir) for m in [re.match(r'(\d+) ', f)] if m])
     stopped = None
+    day = today.isoformat()
     not_role = f'not a {fi.role_words(wanted)} role'
 
     def cap_left(company):
@@ -1317,13 +1340,17 @@ def pick_batch(a, status, rows, tracker_note):
         changed[i] = with_tag(line, tag)
         held.append(f'{who} ({why})')
 
-    # Lines an earlier call today picked count toward the caps (their tracker rows may not exist yet).
+    # Lines an earlier call today picked count toward the caps (their tracker rows may not exist yet), and their
+    # iCIMS sites are taken.
     for line in top:
         m = re.match(r'\s*(https?://\S+)\s+#([^#]*)$', line)
-        if m and f'| picked {today.isoformat()}' in line:
+        mark = picked_on([x.strip() for x in m.group(2).split('|')], day) if m else None
+        if mark:
             taken.append(m.group(2).split('|')[0].strip() or m.group(1))
             site, ids = parse(m.group(1))
-            if site == 'icims' and ids:
+            if mark.group(2):
+                hosts.add(mark.group(2))
+            elif site == 'icims' and ids:
                 hosts.add(ids['host'])
 
     for i, line in enumerate(top):
@@ -1338,7 +1365,7 @@ def pick_batch(a, status, rows, tracker_note):
         company, title = (parts + ['', ''])[:2]
         who = f'{company}: {title}' if company else url
         holds = [x for x in parts if x.startswith('held:')]
-        if f'picked {today.isoformat()}' in parts:
+        if picked_on(parts, day):
             passed['picked earlier today'] = passed.get('picked earlier today', 0) + 1
             continue
         if any(not AUTO_HELD.match(' | ' + h) for h in holds):
@@ -1369,7 +1396,7 @@ def pick_batch(a, status, rows, tracker_note):
             stopped = 'fetch limit'
             break
         attempts += 1
-        item, p = fetch_item(attempts, url, a.out_dir, status, rows, blocked)
+        item, p = fetch_item(start + attempts, url, a.out_dir, status, rows, blocked)
         if not item.get('ok') and company:  # unread postings: the queue's note says what they are
             item.update({'company': company, 'role': title, 'from_note': True})
         if item.get('screen') == 'skip':
@@ -1405,12 +1432,18 @@ def pick_batch(a, status, rows, tracker_note):
         if icims_host in hosts:
             hold(i, line, 'held: one per iCIMS site', who, 'one per iCIMS site')
             continue
-        changed[i] = with_tag(line, f'picked {today.isoformat()}')
+        changed[i] = with_tag(line, f'picked {day}' + (f' iCIMS {icims_host}' if icims_host and icims_host != host else ''))
         taken.append(name or url)
         if icims_host:
             hosts.add(icims_host)
-        item['order'] = attempts  # queue order across picks and to_judge: a check that passes takes its place in line
+        item['order'] = start + attempts  # queue order across picks and to_judge: a check that passes takes its place in line
         (judge if item.get('screen') == 'check' else picks).append(item)
+
+    try:
+        with open(counter, 'w', encoding='utf-8') as f:
+            f.write(str(start + attempts))
+    except OSError:
+        pass
 
     # A posting closing within 3 days goes first; the rest keep the queue's order.
     for item in picks + judge:
