@@ -143,6 +143,25 @@ def other_term(title, url, term):
     return bool(named) and season not in named and not (season == 'fall' and 'autumn' in named)
 
 
+# Full-time jobs that reach the internship lists: "Engineer 1 New Grad - Software" (Shield AI), "Data Scientist New
+# Grad" (Micron), and "Returning New Grad Software Engineer I (For Current/Previous HNTB Interns ONLY)" (HNTB,
+# 2026-11-20). A title that also names an internship ("Aerospace Intern New Grad",
+# "Entry-Level / Intern") is kept; "interns" inside a "for current or previous interns only" clause doesn't count.
+NEW_GRAD = re.compile(r'\b(new[- ]?grad(uate)?s?|(recent|university|college) grad(uate)?s?|entry[- ]level)\b')
+PAST_INTERNS = re.compile(r'\b(returning|current|previous|former|past)\b[^()]{0,40}\binterns?\b[^()]{0,12}\bonly\b|\breturning interns?\b')
+
+
+def not_internship(title, term):
+    """True for a title that isn't an internship the user can apply to: a new-grad job, or one only for the
+    company's own past interns. Only for a profile with an internship term, like other_term()."""
+    if not term:
+        return False
+    t = str(title or '').lower()
+    if PAST_INTERNS.search(t):
+        return True
+    return bool(NEW_GRAD.search(t)) and not re.search(r'\b(interns?|internships?|co-?ops?)\b', t)
+
+
 GRAD_TITLE = re.compile(r'\b(ph\.?\s?d|doctoral|doctorate|master\'?s|mba)\b')
 UNDERGRAD_TITLE = re.compile(r'\b(bachelor\w*|undergrad\w*|bs|ba)\b')
 
@@ -195,6 +214,9 @@ WEAK = {
                         r'sustainability|environmental|safety|policy|customer|summer analyst)\b'),
 }
 PRODUCT_JOB = re.compile(r'\b(product manag\w*|product owner|program manag\w*|project manag\w*)\b')  # a PM role whatever else it says
+# A writing role whatever else it says: "Technical Writer Intern, Developer Experience" counted as software through
+# "Developer" (Together AI, 2026-11-20).
+WRITER_JOB = re.compile(r'\b(technical writ\w*|writers?|copywrit\w*)\b')
 
 
 def role_kinds(text):
@@ -232,6 +254,8 @@ def role_fits(title, wanted):
     if not wanted:
         return True
     if 'product' not in wanted and PRODUCT_JOB.search(str(title or '').lower()):
+        return False
+    if WRITER_JOB.search(str(title or '').lower()):
         return False
     strong, weak = role_kinds(title)
     if strong & wanted:
@@ -641,6 +665,8 @@ def tidy(folder):
             moved.append((line.rstrip() + f' | skipped: not a {role_words(wanted)} role', note, 'not a wanted role'))
         elif len(parts) > 1 and other_term(parts[1], m.group(0), term):
             moved.append((line.rstrip() + ' | skipped: the title names another term', note, 'another term'))
+        elif len(parts) > 1 and not_internship(parts[1], term):
+            moved.append((line.rstrip() + ' | skipped: not an internship', note, 'not an internship'))
         else:
             keep.append(line)
         seen |= links
@@ -661,6 +687,7 @@ def tidy(folder):
             'not_in_us': sum(1 for *_, why in moved if why == 'not in the U.S.'),
             'not_a_wanted_role': sum(1 for *_, why in moved if why == 'not a wanted role'),
             'another_term': sum(1 for *_, why in moved if why == 'another term'),
+            'not_an_internship': sum(1 for *_, why in moved if why == 'not an internship'),
             'left_in_queue': sum(1 for l in keep if re.search(r'https?://', l)),
             'moved': shown + ([f'... {len(moved) - 10} more'] if len(moved) > 10 else [])}
 
@@ -836,7 +863,7 @@ def main():
     kw = [norm(k) for k in a.keyword]
     ex = [norm(k) for k in a.exclude_keyword]
 
-    skipped = {'linkedin_link': 0, 'closed': 0, 'term': 0, 'category': 0, 'role': 0, 'skip_list': 0, 'location': 0, 'outside_us': 0,
+    skipped = {'linkedin_link': 0, 'closed': 0, 'term': 0, 'not_internship': 0, 'category': 0, 'role': 0, 'skip_list': 0, 'location': 0, 'outside_us': 0,
                'keyword': 0, 'degree': 0, 'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0}
     wanted, skips = wanted_roles(profile), skip_names(profile)
     if wanted:
@@ -852,6 +879,8 @@ def main():
             skipped['closed'] += 1; continue
         if not (term in x['terms'] if x.get('terms') is not None else title_term_ok(x.get('title'), term)):
             skipped['term'] += 1; continue
+        if not_internship(x.get('title'), term):
+            skipped['not_internship'] += 1; continue
         if cats and not ({x.get('category')} | ({'Quant'} if x.get('quant') else set())) & cats:
             skipped['category'] += 1; continue
         if role_fits(x.get('title'), wanted) is False:
