@@ -517,13 +517,40 @@ def from_json_ld(j, url):
             'questions': [], 'self_id': [], 'consent': [], 'form_note': ''}
 
 
+def icims_apply(host, jid):
+    """Where to open an iCIMS form in the browser.
+
+    iCIMS shows its pages inside a frame (#icims_content_iframe) that the browser tools can't see into: no fields,
+    no Fill report, no file uploads. One page loaded with mobile=true puts the visit in mobile mode, and every later
+    page of the site (the login and every application step) then comes as a plain page; a page loaded with
+    mobile=false switches it back. Checked 2026-11-19 in headless Chrome on Garmin and Rivian (job, then login) and
+    with curl on GDMS, ICE and Shure; past fills that started from such a link saw their fields, the rest didn't.
+    """
+    return f'https://{host}/jobs/{jid}/job?mobile=true&needsRedirect=false'
+
+
+def icims_behind(url, body):
+    """The iCIMS address behind a company's own job page (careers.northwind.com/jobs/123?icims=1), from its Apply
+    link, or None. The job's number in that link matches the page's; the site's other links (Log In) can name
+    another iCIMS host than the one taking applications."""
+    links = dict.fromkeys((h.lower(), n) for h, n in re.findall(r'https?://([a-z0-9-]+\.icims\.com)/jobs/(\d+)\b', body, re.I))
+    numbers = set(re.findall(r'\d+', urllib.parse.urlparse(url).path))
+    same = [x for x in links if x[1] in numbers]
+    pick = same if same else list(links)
+    return icims_apply(*pick[0]) if len(pick) == 1 else None
+
+
 def other(p):
     """A site without a reader of its own: its page's JobPosting data, if it has one."""
     final, body = page(p['url'])
     j = json_ld_posting(body)
     if not j:
         raise Failed('not a site with public job data here. Open it in the browser.')
-    return from_json_ld(j, final)
+    d = from_json_ld(j, final)
+    apply = icims_behind(final, body)
+    if apply:
+        d['apply_url'] = apply
+    return d
 
 
 _atlassian = []  # Atlassian's whole job list, downloaded once per run
@@ -549,7 +576,9 @@ def icims(p):
     j = json_ld_posting(body)
     if not j:
         raise Failed("couldn't read this iCIMS page's job data (the posting may have closed). Open it in the browser.")
-    return from_json_ld(j, final)
+    d = from_json_ld(j, final)
+    d['apply_url'] = icims_apply(p['host'], p['id'])
+    return d
 
 
 def section_text(chunk):
@@ -1052,7 +1081,8 @@ SOURCE = {'other': 'the posting page', 'icims': 'the iCIMS posting page', 'amazo
 
 
 def as_markdown(url, site, p):
-    lines = [f"# {p['role']} — {p['company']}", f'- URL: {url}', f"- Deadline: {p['deadline'] or 'none listed'}",
+    lines = [f"# {p['role']} — {p['company']}", f'- URL: {url}'] + ([f"- Apply at: {p['apply_url']}"] if p.get('apply_url') else []) + [
+             f"- Deadline: {p['deadline'] or 'none listed'}",
              f"- Location: {p['location'] or 'not listed'}", f"- Pay: {p['pay'] or 'not listed in the job data (check the description)'}",
              f"- Posted: {p['posted'] or 'not listed'}",
              f"- Fetched {dt.date.today().isoformat()} from {SOURCE.get(site, site.title() + chr(39) + 's public job data')}"
@@ -1181,6 +1211,8 @@ def main():
                 item['screen'] = p['screen']
                 if p['screen_why']:
                     item['screen_why'] = p['screen_why']
+            if p.get('apply_url'):
+                item['apply_url'] = p['apply_url']
             if p.get('company_from_url'):
                 item['check_company'] = True
             if rows is not None:
@@ -1193,6 +1225,8 @@ def main():
                     item['same_posting_in_tracker'] = bool(hits)
         except Failed as e:
             item.update({'ok': False, 'error': str(e)})
+            if site == 'icims' and ids and not isinstance(e, Closed):  # the link alone gives the address
+                item['apply_url'] = icims_apply(ids['host'], ids['id'])
             if isinstance(e, Blocked):
                 blocked.add(e.host)
             if isinstance(e, Closed):

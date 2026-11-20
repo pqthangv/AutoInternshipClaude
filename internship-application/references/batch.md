@@ -85,9 +85,10 @@ site (filling.md, "iCIMS has no review page"). That step's heading counts its fo
 In Review mode, stop when that last step opens.
 iCIMS's "Create a login" step (Login and Password boxes above the profile) is a form page: fill all of it, the
 files and the profile's email in Login included, and leave only the two password boxes. Then hand over: the user
-types a password in both and clicks Submit (filling.md, "Sign-ins and accounts"). Open iCIMS links as they are;
-when the company's site wraps the form and read_page shows no fields, call read_page with the filter "all" once
-and use the references it lists (filling.md, "Keep browser work cheap").
+types a password in both and clicks Submit (filling.md, "Sign-ins and accounts"). Open iCIMS at the Application
+link (it ends in mobile=true&needsRedirect=false). If a page shows only "Skip Branding" and no fields, open its
+address again with mobile=true&needsRedirect=false in its query (in place of mobile=false); never click "Skip Branding"
+(filling.md, "Keep browser work cheap").
 Don't leave the step that takes the resume until it shows the tailored PDF's file name; if you can't attach
 it there (on iCIMS, Replace Resume shows the file box), stop on that step and hand it over.
 Attach or paste the cover letter wherever the form takes one, optional fields included (filling.md, "Cover letter").
@@ -115,7 +116,7 @@ answers under To save.
 Browser work (filling.md has the rest): find fields with find or read_page and click or scroll_to them by
 reference, never by screen position, and never scroll by screen position. At most one screenshot per page,
 as a call of its own, never inside a batch.
-- Job folder: <folder>  Application link: <url>  Resume: <PDF path>  Answers: <drafts file, or none>
+- Job folder: <folder>  Application link: <url; the fetch's apply_url when it has one>  Resume: <PDF path>  Answers: <drafts file, or none>
 - Cover letter: <letter path and cover-letter.txt path (and the combined PDF's), or none>  Master resume: <path>
 - Profile: <folder>/profile.json  Tracker: <folder>/tracker.xlsx
 - Tab: <open a new tab of your own | continue in tab <id>: the user has since <what they did>, and answered: <answers>
