@@ -22,7 +22,7 @@
 
   // Never auto-filled. These get an amber outline so you (or Claude, with your OK) handle them.
   const SENSITIVE = /\b(ssn|social security|social insurance|national insurance|tax id|passport|driver'?s? licen[cs]e|date of birth|birth ?date|dob|bank|routing|account number|credit card|card number|cvv|password)\b/;
-  const DEMOGRAPHIC = /\b(gender|sex|pronouns?|races?|racial|ethnicity|ethnic|hispanic|latin[oax]|veteran|disability|disabled|sexual orientation|transgender|lgbt\w*|religion|religious|marital)\b/;
+  const DEMOGRAPHIC = /\b(gender|sex|pronouns?|races?|racial|ethnicity|ethnic|hispanic|latin[oax]|veterans?|disability|disabled|sexual orientation|transgender|lgbt\w*|religion|religious|marital)\b/;
   // Demographic questions are never filled from RULES or saved answers. The voluntary self-identification
   // questions (gender, pronouns, Hispanic or Latino, race, veteran status, disability, LGBTQ+, transgender
   // identity, sexual orientation) are filled only from the answers you chose on the profile page; see
@@ -335,6 +335,40 @@
     return prev ? cleanText(prev).slice(0, 200) : '';
   }
 
+  // Loose text written just before a box that has no label of any other kind. iCIMS's self-ID forms put
+  // several dropdowns in one paragraph as "Race<br><span><select>...</select></span><br>Sex<br><span><select>",
+  // so neither a <label> nor nearbyText() finds the words. Walks back from the box (out of inline wrappers)
+  // to the previous line break or block edge. Words that run back to another box count for nothing: they can
+  // be that box's own ("<select>...</select> (gender)<br><input>"). Longer text is a notice, not a label.
+  // Only dropdowns, text areas and text boxes: radio buttons, checkboxes and file boxes have rules of their own.
+  const TEXT_BEFORE_TYPES = /^(text|email|tel|number|url|search|date|month)$/;
+  function textBefore(el) {
+    const tag = el.tagName;
+    if (!(tag === 'SELECT' || tag === 'TEXTAREA' || (tag === 'INPUT' && TEXT_BEFORE_TYPES.test(el.type || 'text')))) return '';
+    const inline = (n) => /^inline/.test(getComputedStyle(n).display);
+    let out = '';
+    const done = () => { const t = out.replace(/\s+/g, ' ').trim(); return t.length <= 250 ? t : ''; };
+    let node = el;
+    for (let steps = 0; steps < 40 && out.length <= 250; steps++) {
+      const prev = node.previousSibling;
+      if (!prev) {
+        const up = node.parentElement;
+        if (!up || !inline(up)) return done(); // the start of a paragraph, cell or other block
+        node = up;
+        continue;
+      }
+      node = prev;
+      if (node.nodeType === 3) { out = node.nodeValue + ' ' + out; continue; }
+      if (node.nodeType !== 1) continue;
+      if (node.tagName === 'BR') { if (out.trim()) return done(); continue; }
+      if (/^(SELECT|TEXTAREA|INPUT|BUTTON)$/.test(node.tagName) || controlCount(node)) return '';
+      if (/^(SCRIPT|STYLE)$/.test(node.tagName) || getComputedStyle(node).display === 'none') continue;
+      out = cleanText(node) + ' ' + out;
+      if (!inline(node)) return done();
+    }
+    return '';
+  }
+
   // The field's label as written on the form. labelFor() is the lowercased version used for matching;
   // this one goes into the report so Claude can record each field by its real label.
   function rawLabel(el) {
@@ -351,12 +385,18 @@
     };
     try { if (el.labels) for (const l of el.labels) add(cleanText(l)); } catch (_) { /* some inputs throw */ }
     const aria = el.getAttribute('aria-label');
-    if (aria) add(aria);
+    // iCIMS sets aria-label to the box's own name ("icims_f_Race_DD"): a code, so the words on the page come
+    // first, and the code is used only when there are none.
+    const own = [el.getAttribute('name'), el.id].map((s) => (s || '').trim().toLowerCase());
+    const codeAria = !!aria && own.includes(aria.trim().toLowerCase());
+    if (aria && !codeAria) add(aria);
     const ids = el.getAttribute('aria-labelledby');
     if (ids) for (const id of ids.split(/\s+/)) { const n = byId(el, id); if (n) add(cleanText(n)); }
     let label = parts.join(' ');
     if (!norm(label)) label = nearbyText(el);
+    if (!norm(label)) label = textBefore(el);
     if (!norm(label) && el.placeholder) label = el.placeholder;
+    if (!norm(label) && codeAria) label = aria;
     return label;
   }
 
@@ -642,7 +682,7 @@
     if (NOT_SELF_ID.test(q)) return null;
     if (/\b(races?|racial|ethnicity|ethnic)\b/.test(q)) return 'race';
     if (/\bhispanic\b|\blatin[oax]\b/.test(q)) return 'hispanic';
-    if (/\bveteran\b/.test(q)) return 'veteran';
+    if (/\bveterans?\b/.test(q)) return 'veteran'; // iCIMS: "...the categories of protected veterans listed above..."
     if (/\bdisab/.test(q)) return 'disability';
     if (/\b(gender|sex)\b/.test(q)) return 'gender';
     return null;

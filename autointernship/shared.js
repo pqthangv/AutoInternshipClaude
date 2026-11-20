@@ -20,6 +20,9 @@ const AutoInternship = (() => {
       savedAnswers: [],
       // For Claude's written answers; the internship-application skill reads these from profile.json.
       writingStyle: '', extraRules: '',
+      // For Claude's batch runs: the kinds of role to apply to ("software, data") and companies to pass over,
+      // each a comma-separated list. Empty means no limit.
+      roleTypes: '', skipCompanies: '',
     };
   }
 

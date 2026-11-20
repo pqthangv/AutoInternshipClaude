@@ -51,6 +51,7 @@ import os
 import re
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 
 SOURCE = 'https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json'
@@ -117,6 +118,31 @@ def title_term_ok(title, term):
     return not years or year in years
 
 
+def link_title(url):
+    """The title part of a Workday link (".../job/City/Spring-2027-Co-op--Embedded-Software-Engineer_R26-3473"), which
+    keeps words the lists' shortened titles drop ("Embedded Software Engineer Co-op"); '' for other sites."""
+    u = urllib.parse.urlparse(str(url or ''))
+    if 'myworkday' not in u.netloc.lower():
+        return ''
+    last = urllib.parse.unquote(u.path.rstrip('/').split('/')[-1])
+    return re.sub(r'[-_]+', ' ', re.sub(r'_[A-Za-z0-9-]*\d[A-Za-z0-9-]*$', '', last)).strip()
+
+
+def other_term(title, url, term):
+    """True when the title names another term, or names none while its Workday link names another season. Only the
+    season counts in a link: reposted requisitions keep old years ("Software-Engineer-Intern-Summer-2026" for a
+    Summer 2027 posting, the user's queue 2026-11-19)."""
+    if not term:
+        return False
+    if not title_term_ok(title, term):
+        return True
+    if re.search(r'\b(summer|fall|autumn|winter|spring|20\d{2})\b', str(title or '').lower()):
+        return False
+    season = term.split()[0].lower()
+    named = set(re.findall(r'\b(summer|fall|autumn|winter|spring)\b', link_title(url).lower()))
+    return bool(named) and season not in named and not (season == 'fall' and 'autumn' in named)
+
+
 GRAD_TITLE = re.compile(r'\b(ph\.?\s?d|doctoral|doctorate|master\'?s|mba)\b')
 UNDERGRAD_TITLE = re.compile(r'\b(bachelor\w*|undergrad\w*|bs|ba)\b')
 
@@ -125,6 +151,119 @@ def title_rules_out(title, degree):
     """For a listing with no degree field: True when the title asks for a graduate degree an undergraduate lacks."""
     t = str(title or '').lower()
     return degree in ("Bachelor's", "Associate's") and bool(GRAD_TITLE.search(t)) and not UNDERGRAD_TITLE.search(t)
+
+
+# ---- the user's own limits on the queue: profile.json's roleTypes ("software, data") and skipCompanies ----
+
+# What kind of role a job title names. SimplifyJobs' categories put "Industrial Engineering Intern" under AI/ML/Data and
+# "Embedded Software Engineer" under Hardware (the user's queue, 2026-11-19), so the title decides. Strong words
+# ("software", "machine learning") name a kind outright, even beside another ("Hardware/Software Integration"). Weak
+# words ("cloud", "AI", "technology") count unless a hardware, trading or product word is there too: checked against
+# the 389 titles a batch moved by hand as not software (2026-11-17), counting them anyway had kept "Cloud Hardware
+# Development Engineer", "AI Product Manager" and "... St. Cloud". A title that names no kind ("Systems Engineer
+# Intern") is kept: it can't tell.
+STRONG = {
+    'software': re.compile(r'\b(software|swe|sde|sdet|developers?|software development|programm(er|ing)|full[- ]?stack|devops|'
+                           r'site reliability|sre|application development|app development|cyber ?security|security engineer\w*|'
+                           r'test automation|quality assurance|qa|forward deployed|computer science|database|linux|windows engineer|'
+                           r'gameplay|coding|graphics engineer\w*|tools engineer\w*|compilers?|python|java|javascript|typescript|c\+\+|'
+                           r'quant\w* develop\w*|engineering summer analyst)(?![\w+])'),
+    'data': re.compile(r'\b(machine learning|ml|deep learning|computer vision|nlp|natural language|llms?|genai|data scien\w*|'
+                       r'data engineer\w*|data analy\w*|analytics|statistic\w*|biostatistic\w*)\b'),
+    'hardware': re.compile(r'\b(hardware|electrical|electronics|firmware|fpga|asic|rtl|vlsi|analog|rf|rfid|circuits?|pcb|mechanical|'
+                           r'industrial engineer\w*|process engineer\w*|civil|structural|aerospace|failure analysis|layout|optical|'
+                           r'photonics?|lasers?|plasma|mixed signal|voltage|power electronics|device engineer\w*|test engineer\w*)\b'),
+    'product': re.compile(r'\b(product manag\w*|product owner|program manag\w*|project manag\w*|product design\w*|ux)\b'),
+    'quant': re.compile(r'\b(trading|traders?|quants?|quantitative (research\w*|trad\w*|analyst|analysis|strateg\w*|finance|modell?ing))\b'),
+    # Departments and fields: a weak software or data word beside one still fits ("Financial AI Engineering Intern",
+    # "Manufacturing AI Intern"); alone ("Marketing Analyst Intern") it doesn't.
+    'other': re.compile(r'\b(finance|financial|accounting|accountant|audit\w*|tax|marketing|sales|human resources|hr|recruit\w*|'
+                        r'talent acquisition|talent management|legal|business development|supply chain|logistics|procurement|'
+                        r'consult\w*|account manag\w*|actuar\w*|underwrit\w*|investment|banking|graphic design\w*|clinical|nurs\w*|'
+                        r'pharm\w*|biolog\w*|chemist\w*|chemical|manufacturing|industrial|semiconductor\w*|silicon|chips?|materials?|'
+                        r'packaging|battery|thermal|assembly)\b'),
+}
+WEAK = {
+    'software': re.compile(r'\b(web|mobile|ios|android|cloud|aws|azure|platform engineer\w*|infrastructure|front[- ]?end|back[- ]?end|'
+                           r'development engineer\w*|applications? engineer\w*|automation engineer\w*|information technology|'
+                           r'technology|games?)\b'),
+    'data': re.compile(r'\b(data|ai|artificial intelligence|generative|business intelligence|power bi|scientists?|research engineer\w*|'
+                       r'robot\w*|autonomy|autonomous|perception|predictive|model(l)?er|model(l)?ing)\b'),
+    # Words that name another kind of work loosely: beside a weak software or data word ("IT Operations Engineer",
+    # "Data-Driven Sustainability") the title still fits; alone ("Summer Analyst Intern") it doesn't.
+    'other': re.compile(r'\b(people|business analyst|business operations|business strategy|strategy|operations|communications|'
+                        r'sustainability|environmental|safety|policy|customer|summer analyst)\b'),
+}
+PRODUCT_JOB = re.compile(r'\b(product manag\w*|product owner|program manag\w*|project manag\w*)\b')  # a PM role whatever else it says
+
+
+def role_kinds(text):
+    """(kinds named by strong words, kinds named only by weak words) in a job title."""
+    raw = str(text or '')
+    low = raw.lower().replace('/', ' / ')
+    strong = {k for k, rx in STRONG.items() if rx.search(low)}
+    weak = {k for k, rx in WEAK.items() if rx.search(low)}
+    if re.search(r'\bIT\b', raw):  # "IT Intern"; lowercase "it" is a word
+        weak.add('software')
+    if re.search(r'\bBI\b', raw):  # "BI Analyst Intern"
+        weak.add('data')
+    return strong, weak - strong
+
+
+def role_types(text):
+    """Every kind of role a job title (or a roleTypes entry like "AI/ML") names: software, data, hardware, product,
+    quant, other."""
+    strong, weak = role_kinds(text)
+    return strong | weak
+
+
+def wanted_roles(profile):
+    """The kinds of role profile.json's roleTypes asks for ("software, AI/ML, data"); empty means every kind."""
+    out = set()
+    for x in profile_list(profile.get('roleTypes')):
+        k = norm(x)
+        out |= role_types(x) | ({{'pm': 'product'}.get(k, k)} & set(STRONG))  # "product" alone names no title words
+    return out - {'other'}
+
+
+def role_fits(title, wanted):
+    """True when the title names a wanted kind of role (or nothing is asked), False when it names other kinds, None
+    when it names none."""
+    if not wanted:
+        return True
+    if 'product' not in wanted and PRODUCT_JOB.search(str(title or '').lower()):
+        return False
+    strong, weak = role_kinds(title)
+    if strong & wanted:
+        return True
+    if weak & wanted and not (strong - wanted - {'other'}):  # a department beside it is fine; hardware, trading or PM aren't
+        return True
+    return False if strong or weak else None
+
+
+def role_words(wanted):
+    """'software or data', for notes and reports."""
+    return ' or '.join(k for k in ('software', 'data', 'hardware', 'product', 'quant') if k in wanted)
+
+
+def profile_list(value):
+    """Items of a profile field written as a list in one string ("Northwind Labs, Fabrikam")."""
+    return [x.strip() for x in re.split(r'[,;\n]+', str(value or '')) if x.strip()]
+
+
+def skip_names(profile):
+    return {bare_name(x) for x in profile_list(profile.get('skipCompanies'))} - {''}
+
+
+def skip_listed(company, names):
+    """True when the company is one profile.json's skipCompanies names ("Contoso" covers "Contoso Energy")."""
+    b = bare_name(company)
+    return bool(b) and any(b == s or b.startswith(s + ' ') for s in names)
+
+
+def profile_term(profile):
+    m = re.search(r'(summer|fall|winter|spring)\s+(20\d{2})', str(profile.get('internshipTerm', '')), re.I)
+    return f'{m.group(1).title()} {m.group(2)}' if m else None
 
 
 def load_profile(folder):
@@ -463,8 +602,10 @@ def tidy(folder):
 
     The top of the queue goes stale when a run forgets to move what it processed, and each batch then re-checked
     every pick against tracker.xlsx with one-off scripts. Matching uses the link, its job ID, and the company and
-    role from the line's note (any status counts, Skipped included). Lines are moved, never deleted. Then the
-    queue is sorted (sort_queue) from the fame tags already in the notes.
+    role from the line's note (any status counts, Skipped included). Lines whose title isn't a kind of role
+    profile.json's roleTypes asks for, or names another term ("Spring 2027 Co-op"), go too; batches had done that
+    by hand over several rounds. Lines are moved, never deleted. Then the queue is sorted (sort_queue) from the
+    fame tags already in the notes.
     """
     jobs_path = os.path.join(folder, 'jobs.txt')
     if not os.path.exists(jobs_path):
@@ -474,7 +615,9 @@ def tidy(folder):
     lines = open(jobs_path, encoding='utf-8').read().splitlines()
     done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
     keep, moved, seen = [], [], set()
-    us_only = home_is_us(load_profile(folder))  # the user's call (2026-11-08): batches skip jobs outside the U.S.
+    profile = load_profile(folder)
+    us_only = home_is_us(profile)  # the user's call (2026-11-08): batches skip jobs outside the U.S.
+    wanted, term = wanted_roles(profile), profile_term(profile)
     for line in lines[:done_at]:
         m = re.search(r'https?://\S+', line)
         if not m:
@@ -494,6 +637,10 @@ def tidy(folder):
             moved.append((line, note or m.group(0), 'listed twice'))
         elif us_only and len(parts) > 2 and outside_us(parts[2]):
             moved.append((line.rstrip() + ' | not in the U.S.', note, 'not in the U.S.'))
+        elif len(parts) > 1 and role_fits(parts[1], wanted) is False:
+            moved.append((line.rstrip() + f' | skipped: not a {role_words(wanted)} role', note, 'not a wanted role'))
+        elif len(parts) > 1 and other_term(parts[1], m.group(0), term):
+            moved.append((line.rstrip() + ' | skipped: the title names another term', note, 'another term'))
         else:
             keep.append(line)
         seen |= links
@@ -512,6 +659,8 @@ def tidy(folder):
             'in_tracker': sum(1 for *_, why in moved if why.startswith('in tracker')),
             'listed_twice': sum(1 for *_, why in moved if why == 'listed twice'),
             'not_in_us': sum(1 for *_, why in moved if why == 'not in the U.S.'),
+            'not_a_wanted_role': sum(1 for *_, why in moved if why == 'not a wanted role'),
+            'another_term': sum(1 for *_, why in moved if why == 'another term'),
             'left_in_queue': sum(1 for l in keep if re.search(r'https?://', l)),
             'moved': shown + ([f'... {len(moved) - 10} more'] if len(moved) > 10 else [])}
 
@@ -687,8 +836,13 @@ def main():
     kw = [norm(k) for k in a.keyword]
     ex = [norm(k) for k in a.exclude_keyword]
 
-    skipped = {'linkedin_link': 0, 'closed': 0, 'term': 0, 'category': 0, 'location': 0, 'outside_us': 0, 'keyword': 0, 'degree': 0,
-               'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0}
+    skipped = {'linkedin_link': 0, 'closed': 0, 'term': 0, 'category': 0, 'role': 0, 'skip_list': 0, 'location': 0, 'outside_us': 0,
+               'keyword': 0, 'degree': 0, 'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0}
+    wanted, skips = wanted_roles(profile), skip_names(profile)
+    if wanted:
+        defaults_used['roles'] = role_words(wanted)
+    if skips:
+        defaults_used['skip_companies'] = sorted(skips)
     us_only = home_is_us(profile) and not a.include_abroad
     results = []
     for x in simplify + extra:
@@ -700,6 +854,10 @@ def main():
             skipped['term'] += 1; continue
         if cats and not ({x.get('category')} | ({'Quant'} if x.get('quant') else set())) & cats:
             skipped['category'] += 1; continue
+        if role_fits(x.get('title'), wanted) is False:
+            skipped['role'] += 1; continue
+        if skip_listed(x.get('company_name'), skips):
+            skipped['skip_list'] += 1; continue
         if not location_match(x.get('locations') or [], a.location):
             skipped['location'] += 1; continue
         if us_only and outside_us(x.get('locations') or []):
