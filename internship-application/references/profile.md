@@ -20,7 +20,7 @@ Only when the folder has no profile.json:
 - Class standing, internship term, available dates, enrolled now, returning to school after the internship, willing to relocate, work preference.
 - Government ties: a current or former government employee or official (`governmentEmployee`); a close relative who is one (`governmentRelative`).
 - Optional, voluntary self-identification: gender, pronouns, Hispanic or Latino, race, veteran status, disability, LGBTQ+, transgender, sexual orientation. Each is an answer, "decline", or empty (the user answers on each form). Never infer these from a name, photo or anything else.
-- Optional: `writingStyle` and `extraRules` for written answers.
+- Optional: `writingStyle` and `extraRules` for written answers; `roleTypes` and `skipCompanies` for batches.
 
 ## Values
 
@@ -36,6 +36,7 @@ Only when the folder has no profile.json:
   - `transgender`: `yes`, `no`, `decline`
   - `sexualOrientation`: `straight`, `gay`, `lesbian`, `bisexual`, `pansexual`, `asexual`, `queer`, `decline`
 - Text as the user would write it: `classStanding` ("Sophomore"), `expectedGraduation` ("May 2028"), `internshipTerm` ("Summer 2027"), `availableFrom` and `availableUntil` ("June 1, 2027"), `workAuthDetails` (for written answers and the eligibility screen in fetch_posting.py, for example "F-1 student, eligible for CPT"), `salary`, `startDate`, `workPreference`, `summary`, `skills`, `yearsExperience`, `writingStyle`, and `extraRules` (one rule per line).
+- Lists in one string, separated by commas: `roleTypes`, the kinds of role to apply to, from `software`, `data` (AI/ML and data), `hardware`, `product`, `quant` (empty: all); `skipCompanies`, companies batches pass over ("Northwind Labs, Fabrikam"). When the user says to skip a company or a kind of role from now on, save it here.
 - List entries:
   - `education`: `{ "school", "degree", "field", "minor", "start", "end", "gpa" }`, GPA exactly as written.
   - `work`: `{ "title", "company", "location", "start", "end", "highlights" }`, one highlight per line.

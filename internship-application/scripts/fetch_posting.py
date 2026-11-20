@@ -4,6 +4,12 @@
 Usage:
   python fetch_posting.py URL [URL ...] --out-dir DIR [--tracker tracker.xlsx] [--profile profile.json]
   python fetch_posting.py --jobs jobs.txt --out-dir DIR [--limit N] [--tracker tracker.xlsx] [--profile profile.json [--move-skips]]
+  python fetch_posting.py --jobs jobs.txt --pick N --out-dir DIR --profile profile.json [--tracker tracker.xlsx]
+
+--pick goes down the queue until N postings are ready for one batch: it passes over lines the user held or whose
+company is in profile.json's skipCompanies, moves screen skips and titles of other kinds of role (roleTypes) or
+another term below "# done", and holds a third posting from one company, a second from one iCIMS site, and one
+past an application limit its company states. See pick_batch().
 
 Supported: Greenhouse (job boards, embedded forms, and company career pages with ?gh_jid=), Ashby, Lever,
 Workday (myworkdayjobs.com and myworkdaysite.com), SmartRecruiters, Rippling and Oracle (oraclecloud.com). On
@@ -1146,6 +1152,304 @@ def queue(path):
     return urls
 
 
+def fetch_item(n, url, out_dir, status, rows, blocked):
+    """Fetch one posting, write its file and screen it: (its entry in the output, the posting's data or None)."""
+    site, ids = parse(url)
+    item = {'url': url, 'site': site or 'other'}
+    p = None
+    try:
+        if not site:
+            raise Failed('not a site with public job data here. Open it in the browser.')
+        if not ids:
+            raise Failed(f"couldn't read the posting's id from this {site.title()} link. Open it in the browser.")
+        p = SITES[site](ids)
+        p['company'], p['role'] = ' '.join(str(p['company'] or '').split()), ' '.join(str(p['role'] or '').split())
+        if site == 'other' and (not p['role'] or not p['description']):
+            raise Failed("the page's job data has no title or description. Open it in the browser.")
+        if status:
+            p['screen'], p['screen_why'] = screen(p, status)
+        p['cover_letter'], p['cover_line'] = cover_letter(site, p)
+        path = os.path.join(out_dir, file_name(n, p))
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(as_markdown(url, site, p))
+        item.update({'ok': True, 'company': p['company'], 'role': p['role'], 'location': p['location'], 'deadline': p['deadline'],
+                     'pay': p['pay'], 'posted': p['posted'], 'file': path, 'questions': len(p['questions']),
+                     'written': [q['label'][:120] for q in p['questions'] if q['kind'] == 'text box' and not cover_field(q)],
+                     'cover_letter': p['cover_letter']})
+        if status:
+            item['screen'] = p['screen']
+            if p['screen_why']:
+                item['screen_why'] = p['screen_why']
+        if p.get('apply_url'):
+            item['apply_url'] = p['apply_url']
+        if p.get('company_from_url'):
+            item['check_company'] = True
+        if rows is not None:
+            same = [r for r in rows if norm(p['company']) and (norm(p['company']) in norm(r.get('company'))
+                                                               or norm(r.get('company')) in norm(p['company']))]
+            key = url_key(url)
+            hits = [r for r in rows if url_key(r.get('posting_url')) == key] if key else []
+            if same or hits:
+                item['in_tracker'] = [{k: r.get(k) for k in ('id', 'role', 'status', 'date_added')} for r in {r['id']: r for r in same + hits}.values()]
+                item['same_posting_in_tracker'] = bool(hits)
+    except Failed as e:
+        p = None
+        item.update({'ok': False, 'error': str(e)})
+        if site == 'icims' and ids and not isinstance(e, Closed):  # the link alone gives the address
+            item['apply_url'] = icims_apply(ids['host'], ids['id'])
+        if isinstance(e, Blocked):
+            blocked.add(e.host)
+        if isinstance(e, Closed):
+            item['closed'] = True
+            if status:  # a screen skip like any other: --move-skips moves it, and no agent opens it
+                item['screen'], item['screen_why'] = 'skip', ['posting closed: the site says it no longer exists']
+    return item, p
+
+
+def blocked_hint(blocked):
+    # Said once, so the user can fix it in a minute instead of every posting costing a browser read.
+    extra = sorted(h for h in blocked if h not in ALLOW and not h.endswith(('.myworkdayjobs.com', '.myworkdaysite.com', '.oraclecloud.com', '.icims.com')))
+    return {'network_blocked': sorted(blocked),
+            'hint': ("This computer's network blocks the job sites, so these postings need the browser. To fetch them "
+                     "without it, allow these domains in the Claude app's settings for code execution (network access): "
+                     + ', '.join(ALLOW + extra) + '. If wildcards (*) aren\'t accepted, add each Workday host instead, '
+                     'such as ' + (next((h for h in sorted(blocked) if 'myworkday' in h), 'nvidia.wd5.myworkdayjobs.com')) + '.')}
+
+
+# ---- --pick: a batch's postings from the top of the queue ----
+
+# Caps on how many of one company's jobs a person may apply to, as postings word them: "Candidates may apply to a
+# maximum of two positions across Our Company and its affiliates", "limited to three (3) applications within a 30-day
+# period", "a maximum of 3 applications within a 6-month period", "apply to no more than two internship roles"
+# (saved postings, 2026-11-19). "One application per role each year" caps one role, not the company.
+WORD_NUM = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10, 'twelve': 12}
+APPLY_WORD = re.compile(r'\b(apply|applying|applications?|submit|candidates?|applicants?)\b', re.I)
+LIMIT_NUM = re.compile(r'\b(?:maximum of|max(?:imum)?(?: of)?|up to|no more than|limited to|limit of|only (?:apply (?:to|for) )?)\s*'
+                       r'(\d+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s*\(\d+\))?\s+(?:[\w-]+\s+){0,2}?'
+                       r'(?:positions?|roles?|applications?|jobs?|openings?|requisitions?|internships?)\b', re.I)
+PER_ROLE = re.compile(r'\b(?:per|for each|each)\s+(?:role|position|job|requisition|opening)\b', re.I)
+LIMIT_WINDOW = re.compile(r'\b(?:within|in|per|every|each|over|during)\s+(?:a|an|any|the|one)?\s*(\d+|one|two|three|six|twelve)?[- ]?'
+                          r'(day|week|month|year)s?\b', re.I)
+
+
+def apply_limit(description):
+    """(N, days or None, sentence) when the posting caps how many of the company's jobs one person may apply to."""
+    for s, _, _ in sentences(html.unescape(description or '')):
+        m = LIMIT_NUM.search(s)
+        if not m or not APPLY_WORD.search(s) or PER_ROLE.search(s):
+            continue
+        n = WORD_NUM.get(m.group(1).lower()) or int(m.group(1))
+        w = LIMIT_WINDOW.search(s, m.end())
+        days = None
+        if w:
+            qty = WORD_NUM.get((w.group(1) or 'one').lower()) or int(w.group(1))
+            days = qty * {'day': 1, 'week': 7, 'month': 30, 'year': 365}[w.group(2).lower()]
+        return n, days, s
+    return None
+
+
+# Tags the picker writes into a line's note, and rewrites on every run. Any other "held:" is the user's.
+AUTO_HELD = re.compile(r'\s*\|\s*held: (?:2 per company|one per iCIMS site|limit \d+(?: per \d+ days)?)(?=\s*(?:\||$))')
+PICKED = re.compile(r'\s*\|\s*picked \d{4}-\d{2}-\d{2}(?=\s*(?:\||$))')
+
+
+def same_company(a, b):
+    """One company under two spellings: "Northwind" and "Northwind Labs" (a note's name and the posting's)."""
+    a, b = norm(a), norm(b)
+    return bool(a and b) and (a == b or a.startswith(b + ' ') or b.startswith(a + ' '))
+
+
+def applied_count(rows, company, days=None):
+    """The company's tracker rows, Skipped ones left out; with days, only rows added in that many days."""
+    today, n = dt.date.today(), 0
+    for r in rows:
+        if not same_company(r.get('company'), company) or str(r.get('status') or '').strip().lower() == 'skipped':
+            continue
+        m = re.search(r'(\d{4})-(\d{2})-(\d{2})', str(r.get('date_added') or ''))
+        if days is None or (m and (today - dt.date(*map(int, m.groups()))).days <= days):
+            n += 1
+    return n
+
+
+def with_tag(line, tag):
+    """The line with the picker's own tags replaced by `tag` (None: just removed). A line without a note is left."""
+    m = re.match(r'\s*https?://\S+', line)
+    if not m or '#' not in line[m.end():]:
+        return line
+    base = PICKED.sub('', AUTO_HELD.sub('', line)).rstrip()
+    return f'{base} | {tag}' if tag else base
+
+
+def pick_batch(a, status, rows, tracker_note):
+    """Go down the queue until a.pick postings are ready, for one batch.
+
+    Batches used to fetch and screen the top of jobs.txt, then sort out by hand, over several rounds, what the
+    queue already said or what a title gives away: lines the user held or put on profile.json's skipCompanies,
+    titles of other kinds of role (roleTypes) or another term, a third posting from one company, a second from
+    one iCIMS site. A call with links plus --jobs and no --limit screened the whole queue (~470 links in 10
+    minutes). Here each of those is decided before fetching, and the fetch stops at a.pick postings, so one call
+    gives the batch. Postings the site wouldn't serve (Workday's 429s) count as picks: their own subagent reads
+    them in the browser. Screen checks come extra, for the caller to judge.
+    """
+    sys.path.insert(0, HERE)
+    import find_internships as fi
+    prof = json.load(open(a.profile, encoding='utf-8-sig'))
+    wanted, skips, term = fi.wanted_roles(prof), fi.skip_names(prof), fi.profile_term(prof)
+    today = dt.date.today()
+    rows = rows or []
+    recent = fi.recent_counts({i: r for i, r in enumerate(rows)})
+    lines = open(a.jobs, encoding='utf-8-sig').read().splitlines()
+    done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
+    top = lines[:done_at]
+    os.makedirs(a.out_dir, exist_ok=True)
+
+    changed, moved, held, passed = {}, {}, [], {}
+    picks, judge, taken, hosts, blocked = [], [], [], set(), set()
+    attempts, ceiling = 0, max(15, 4 * a.pick)
+    stopped = None
+    not_role = f'not a {fi.role_words(wanted)} role'
+
+    def cap_left(company):
+        made = sum(v for k, v in recent.items() if same_company(k, company))
+        return max(0, 2 - made) - sum(1 for c in taken if same_company(c, company))
+
+    def hold(i, line, tag, who, why):
+        changed[i] = with_tag(line, tag)
+        held.append(f'{who} ({why})')
+
+    # Lines an earlier call today picked count toward the caps (their tracker rows may not exist yet).
+    for line in top:
+        m = re.match(r'\s*(https?://\S+)\s+#([^#]*)$', line)
+        if m and f'| picked {today.isoformat()}' in line:
+            taken.append(m.group(2).split('|')[0].strip() or m.group(1))
+            site, ids = parse(m.group(1))
+            if site == 'icims' and ids:
+                hosts.add(ids['host'])
+
+    for i, line in enumerate(top):
+        if len(picks) >= a.pick:
+            break
+        m = re.match(r'\s*(https?://\S+)', line)
+        if not m:
+            continue
+        url = m.group(1)
+        rest = line[m.end():]
+        parts = [x.strip() for x in rest.split('#', 1)[1].split('|')] if '#' in rest else []
+        company, title = (parts + ['', ''])[:2]
+        who = f'{company}: {title}' if company else url
+        holds = [x for x in parts if x.startswith('held:')]
+        if f'picked {today.isoformat()}' in parts:
+            passed['picked earlier today'] = passed.get('picked earlier today', 0) + 1
+            continue
+        if any(not AUTO_HELD.match(' | ' + h) for h in holds):
+            passed['held by you'] = passed.get('held by you', 0) + 1
+            continue
+        if company and fi.skip_listed(company, skips):
+            passed['on your skip list'] = passed.get('on your skip list', 0) + 1
+            continue
+        if title and fi.role_fits(title, wanted) is False:
+            moved[i] = not_role
+            continue
+        if title and fi.other_term(title, url, term):
+            moved[i] = 'the title names another term'
+            continue
+        lim = next((re.match(r'held: limit (\d+)(?: per (\d+) days)?', h) for h in holds if h.startswith('held: limit')), None)
+        if lim and company and applied_count(rows, company, int(lim.group(2)) if lim.group(2) else None) >= int(lim.group(1)):
+            held.append(f'{who} (its posting allows {lim.group(1)} applications)')  # recounted from the tracker, not fetched again
+            continue
+        if company and cap_left(company) <= 0:
+            hold(i, line, 'held: 2 per company', who, '2 per company')
+            continue
+        site, ids = parse(url)
+        host = ids['host'] if site == 'icims' and ids else None
+        if host in hosts:
+            hold(i, line, 'held: one per iCIMS site', who, 'one per iCIMS site')
+            continue
+        if attempts >= ceiling:
+            stopped = 'fetch limit'
+            break
+        attempts += 1
+        item, p = fetch_item(attempts, url, a.out_dir, status, rows, blocked)
+        if not item.get('ok') and company:  # unread postings: the queue's note says what they are
+            item.update({'company': company, 'role': title, 'from_note': True})
+        if item.get('screen') == 'skip':
+            moved[i] = item['screen_why'][0].split(':')[0]
+            continue
+        if item.get('same_posting_in_tracker'):
+            moved[i] = 'already in the tracker'
+            continue
+        name = company or (p or {}).get('company') or ''
+        if p:
+            if fi.role_fits(p['role'], wanted) is False:
+                moved[i] = not_role
+                continue
+            if fi.other_term(p['role'], url, term):
+                moved[i] = 'the title names another term'
+                continue
+            if fi.skip_listed(p['company'], skips):
+                passed['on your skip list'] = passed.get('on your skip list', 0) + 1
+                continue
+            if not company and cap_left(name) <= 0:
+                hold(i, line, 'held: 2 per company', who, '2 per company')
+                continue
+            limit = apply_limit(p['description'])
+            if limit:
+                n, days, said = limit
+                count = applied_count(rows, name, days) + sum(1 for c in taken if same_company(c, name))
+                per = f' per {days} days' if days else ''
+                if count >= n:
+                    hold(i, line, f'held: limit {n}{per}', who, f'its posting allows {n} applications{per}; the tracker has {count}')
+                    continue
+                item['apply_limit'] = f'{n} applications{per}: "{said[:160]}"'
+        icims_host = host or (re.match(r'https://([^/]+)', item.get('apply_url') or '') or [None, None])[1]
+        if icims_host in hosts:
+            hold(i, line, 'held: one per iCIMS site', who, 'one per iCIMS site')
+            continue
+        changed[i] = with_tag(line, f'picked {today.isoformat()}')
+        taken.append(name or url)
+        if icims_host:
+            hosts.add(icims_host)
+        item['order'] = attempts  # queue order across picks and to_judge: a check that passes takes its place in line
+        (judge if item.get('screen') == 'check' else picks).append(item)
+
+    # A posting closing within 3 days goes first; the rest keep the queue's order.
+    for item in picks + judge:
+        d = re.search(r'\d{4}-\d{2}-\d{2}', str(item.get('deadline') or ''))
+        if d and 0 <= (dt.date.fromisoformat(d.group(0)) - today).days <= 3:
+            item['closes_soon'] = True
+    picks.sort(key=lambda it: not it.get('closes_soon'))
+
+    keep = [changed.get(i, l) for i, l in enumerate(top) if i not in moved]
+    def noted(line):
+        m = re.match(r'\s*https?://\S+', line)
+        return bool(m) and '#' in line[m.end():]  # a link can hold "#" itself
+    gone = [with_tag(top[i], None) + (' | ' if noted(top[i]) else '  # ') + f'skipped: {why}' for i, why in moved.items()]
+    if gone:
+        while keep and not keep[-1].strip():
+            keep.pop()
+        new_lines = keep + ['', '# done'] + gone + lines[done_at + 1:]
+    else:
+        new_lines = keep + lines[done_at:]
+    if new_lines != lines:
+        with open(a.jobs, 'w', encoding='utf-8') as f:  # rewrites jobs.txt in place; nothing is deleted
+            f.write('\n'.join(new_lines) + '\n')
+
+    reasons = {}
+    for why in moved.values():
+        reasons[why] = reasons.get(why, 0) + 1
+    out = {'ok': True, 'asked': a.pick, 'picked': len(picks),
+           'stopped': 'enough' if len(picks) >= a.pick else stopped or 'end of queue', 'fetched': attempts,
+           'picks': picks, 'to_judge': judge, 'held': held, 'moved_below_done': reasons, 'passed_over': passed}
+    if wanted:
+        out['roles'] = fi.role_words(wanted)
+    if blocked:
+        out.update(blocked_hint(blocked))
+    if tracker_note:
+        out['tracker_note'] = tracker_note
+    print(json.dumps(out, indent=1, ensure_ascii=False, default=str))
+    return 0
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding='utf-8')
@@ -1153,8 +1457,10 @@ def main():
         pass
     ap = argparse.ArgumentParser()
     ap.add_argument('urls', nargs='*')
-    ap.add_argument('--jobs', help='jobs.txt: fetch the links above its "# done" line')
+    ap.add_argument('--jobs', help='jobs.txt: fetch the links above its "# done" line (with links given: only the file --move-skips edits)')
     ap.add_argument('--limit', type=int, help='with --jobs, only the first N links')
+    ap.add_argument('--pick', type=int, help='with --jobs and --profile: go down the queue until N postings are ready for a batch, '
+                                             'updating jobs.txt (skips moved below "# done", holds and picks marked)')
     ap.add_argument('--out-dir', required=True, help='where the posting files go (scratch space)')
     ap.add_argument('--tracker', help='tracker.xlsx, to list rows already there for the same company')
     ap.add_argument('--profile', help="profile.json, to screen each posting against the user's status and degree")
@@ -1167,73 +1473,34 @@ def main():
         except (OSError, ValueError) as e:
             print(json.dumps({'ok': False, 'error': f"couldn't read the profile: {e}"}))
             return 1
-
-    urls = list(a.urls)
-    if a.jobs:
-        if not os.path.isfile(a.jobs):
-            print(json.dumps({'ok': False, 'error': f'not found: {a.jobs}'}))
-            return 1
-        urls += queue(a.jobs)[:a.limit] if a.limit else queue(a.jobs)
-    if not urls:
-        print(json.dumps({'ok': False, 'error': 'no links given (pass URLs or --jobs jobs.txt)'}))
+    if a.jobs and not os.path.isfile(a.jobs):
+        print(json.dumps({'ok': False, 'error': f'not found: {a.jobs}'}))
         return 1
-    os.makedirs(a.out_dir, exist_ok=True)
 
     rows, tracker_note = (None, None)
     if a.tracker and os.path.isfile(a.tracker):  # never let a lookup create the tracker
         rows, tracker_note = tracker_rows(a.tracker)
 
+    if a.pick:
+        if not (a.jobs and status) or a.urls:
+            print(json.dumps({'ok': False, 'error': '--pick needs --jobs and --profile, and no links'}))
+            return 1
+        return pick_batch(a, status, rows, tracker_note)
+
+    # Links plus --jobs used to add the whole queue after the links, so a batch meant to screen a few links
+    # screened hundreds. With links, --jobs only says which file --move-skips edits.
+    urls = list(a.urls)
+    if a.jobs and not urls:
+        urls = queue(a.jobs)[:a.limit] if a.limit else queue(a.jobs)
+    if not urls:
+        print(json.dumps({'ok': False, 'error': 'no links given (pass URLs or --jobs jobs.txt)'}))
+        return 1
+    os.makedirs(a.out_dir, exist_ok=True)
+
     results = []
     blocked = set()
     for n, url in enumerate(urls, 1):
-        site, ids = parse(url)
-        item = {'url': url, 'site': site or 'other'}
-        try:
-            if not site:
-                raise Failed('not a site with public job data here. Open it in the browser.')
-            if not ids:
-                raise Failed(f"couldn't read the posting's id from this {site.title()} link. Open it in the browser.")
-            p = SITES[site](ids)
-            p['company'], p['role'] = ' '.join(str(p['company'] or '').split()), ' '.join(str(p['role'] or '').split())
-            if site == 'other' and (not p['role'] or not p['description']):
-                raise Failed("the page's job data has no title or description. Open it in the browser.")
-            if status:
-                p['screen'], p['screen_why'] = screen(p, status)
-            p['cover_letter'], p['cover_line'] = cover_letter(site, p)
-            path = os.path.join(a.out_dir, file_name(n, p))
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(as_markdown(url, site, p))
-            item.update({'ok': True, 'company': p['company'], 'role': p['role'], 'location': p['location'], 'deadline': p['deadline'],
-                         'pay': p['pay'], 'posted': p['posted'], 'file': path, 'questions': len(p['questions']),
-                         'written': [q['label'][:120] for q in p['questions'] if q['kind'] == 'text box' and not cover_field(q)],
-                         'cover_letter': p['cover_letter']})
-            if status:
-                item['screen'] = p['screen']
-                if p['screen_why']:
-                    item['screen_why'] = p['screen_why']
-            if p.get('apply_url'):
-                item['apply_url'] = p['apply_url']
-            if p.get('company_from_url'):
-                item['check_company'] = True
-            if rows is not None:
-                same = [r for r in rows if norm(p['company']) and (norm(p['company']) in norm(r.get('company'))
-                                                                   or norm(r.get('company')) in norm(p['company']))]
-                key = url_key(url)
-                hits = [r for r in rows if url_key(r.get('posting_url')) == key] if key else []
-                if same or hits:
-                    item['in_tracker'] = [{k: r.get(k) for k in ('id', 'role', 'status', 'date_added')} for r in {r['id']: r for r in same + hits}.values()]
-                    item['same_posting_in_tracker'] = bool(hits)
-        except Failed as e:
-            item.update({'ok': False, 'error': str(e)})
-            if site == 'icims' and ids and not isinstance(e, Closed):  # the link alone gives the address
-                item['apply_url'] = icims_apply(ids['host'], ids['id'])
-            if isinstance(e, Blocked):
-                blocked.add(e.host)
-            if isinstance(e, Closed):
-                item['closed'] = True
-                if status:  # a screen skip like any other: --move-skips moves it, and no agent opens it
-                    item['screen'], item['screen_why'] = 'skip', ['posting closed: the site says it no longer exists']
-        results.append(item)
+        results.append(fetch_item(n, url, a.out_dir, status, rows, blocked)[0])
 
     closed = sum(1 for r in results if r.get('closed'))
     failed = sum(1 for r in results if not r['ok']) - closed
@@ -1247,13 +1514,7 @@ def main():
             out['moved_below_done'] = move_skips(a.jobs, skipped) if skipped else 0
     out['postings'] = results
     if blocked:
-        # Said once, so the user can fix it in a minute instead of every posting costing a browser read.
-        extra = sorted(h for h in blocked if h not in ALLOW and not h.endswith(('.myworkdayjobs.com', '.myworkdaysite.com', '.oraclecloud.com', '.icims.com')))
-        out['network_blocked'] = sorted(blocked)
-        out['hint'] = ("This computer's network blocks the job sites, so these postings need the browser. To fetch them "
-                       "without it, allow these domains in the Claude app's settings for code execution (network access): "
-                       + ', '.join(ALLOW + extra) + '. If wildcards (*) aren\'t accepted, add each Workday host instead, '
-                       'such as ' + (next((h for h in sorted(blocked) if 'myworkday' in h), 'nvidia.wd5.myworkdayjobs.com')) + '.')
+        out.update(blocked_hint(blocked))
     if tracker_note:
         out['tracker_note'] = tracker_note
     print(json.dumps(out, indent=1, ensure_ascii=False, default=str))

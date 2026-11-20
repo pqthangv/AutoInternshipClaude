@@ -181,10 +181,12 @@
 
       <section id="claude-rules">
         <h2>Instructions for Claude</h2>
-        <p class="lede">The internship-application skill reads these from your backup (profile.json) when it writes answers for you.</p>
+        <p class="lede">The internship-application skill reads these from your backup (profile.json) when it picks jobs and writes answers for you.</p>
         <div class="grid">
           <label class="field wide"><span>How you write</span><textarea data-key="writingStyle" rows="3" placeholder="Plain and direct. Short sentences. No buzzwords. Mention specific results with numbers."></textarea></label>
           <label class="field wide"><span>Extra rules, one per line</span><textarea data-key="extraRules" rows="3" placeholder="Never say I’m open to relocation for roles outside California."></textarea></label>
+          <label class="field wide"><span>Kinds of roles to apply to (software, data, hardware, product, quant)</span><input data-key="roleTypes" placeholder="software, data"></label>
+          <label class="field wide"><span>Companies to skip, separated by commas</span><input data-key="skipCompanies" placeholder="Northwind Labs, Fabrikam"></label>
         </div>
       </section>
 

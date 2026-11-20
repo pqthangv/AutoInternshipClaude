@@ -6,7 +6,7 @@ AutoInternship is a Chrome extension that fills job application forms from a pro
 
 ## What it stores
 
-- **Your profile**: what you enter on its profile page. That can include your name, email, phone number, address, links (such as LinkedIn or GitHub), education, work history, projects, skills, work authorization and sponsorship answers, availability, salary expectations, your saved answers to application questions, and writing preferences.
+- **Your profile**: what you enter on its profile page. That can include your name, email, phone number, address, links (such as LinkedIn or GitHub), education, work history, projects, skills, work authorization and sponsorship answers, availability, salary expectations, your saved answers to application questions, writing preferences, and the kinds of jobs and companies you want Claude to apply to or skip.
 - **Voluntary self-identification answers**, only if you choose them: gender, pronouns, Hispanic or Latino, race, veteran status, disability status, LGBTQ+, transgender and sexual orientation. Each one is optional. "Not set" stores nothing.
 - **Your resume file**, if you attach one.
 - **One setting**: whether the Fill button shows on application pages.
