@@ -10,8 +10,9 @@ fetch_posting.py --profile.
 Usage:
   python find_internships.py --folder "JOB_SEARCH_FOLDER" [filters] [--append]
   python find_internships.py --folder "JOB_SEARCH_FOLDER" --tidy
-      Moves links in jobs.txt that are already in tracker.xlsx (same link, job ID, or company and role), listed
-      twice, or (for a U.S. profile) outside the U.S. by their note's location, below "# done", then re-sorts the
+      Moves links in jobs.txt that are already in tracker.xlsx (same link, job ID, or company and role, or another
+      requisition of a role applied to), listed twice, or (for a U.S. profile) outside the U.S. by their note's
+      location, below "# done", then re-sorts the
       queue from the fame levels in the notes. Nothing is downloaded and nothing is deleted.
   python find_internships.py --folder "JOB_SEARCH_FOLDER" --sort
       Sets every queued line's fame level ("| fame 1" to "| fame 4" in its note) and sorts the queue.
@@ -39,7 +40,8 @@ Filters (all optional; without them, sensible defaults come from profile.json in
   --include-abroad            keep listings outside the U.S. (a U.S. profile drops them: the user's call, 2026-11-08)
 
 Skips LinkedIn links (LinkedIn prohibits automated tools) and listings that are closed, already in tracker.xlsx (same
-link, job ID, or company and role) or already in jobs.txt.
+link, job ID, or company and role) or already in jobs.txt, and other links to a role already applied to or queued
+(same company, title without its term or requisition number, and city).
 Prints one JSON object. Exit codes: 0 ok, 1 bad input, 6 couldn't download any list (network). When only some lists
 download, the others still give results and `sources_failed` names the missing ones.
 """
@@ -471,6 +473,116 @@ def name_key(company, role):
     return f'name:{norm(company)}|{norm(role)}' if norm(company) and norm(role) else None
 
 
+# ---- one role posted under several links ----
+
+# Companies post one role under several requisitions: DraftKings had "Analyst Intern (Summer 2027)" as JR14926,
+# JR14927, JR15147, JR15148 and a referral-only JR15187, all Boston (SimplifyJobs, 2026-11-20); McDonald's had three
+# links for one Software Development Engineer Intern in Chicago. Links and job IDs differ, so only the title, the
+# company and the place tell them apart. The lists also rename titles ("Analytics Intern" for Workday's "Analyst
+# Intern"), so a Workday link's own title words count as a second title, and the site can name another company
+# (DraftKings' Workday says "Crown Holdings"), so one Workday site counts as one company.
+GRAD_PART = re.compile(r'\b(?:grad(?:uation)?(?: year| date)?|class of|graduating(?: in)?)\s+((?:spring|summer|fall|autumn|winter)\s+)?(20\d\d)\b')
+REQ_NUMBER = re.compile(r'\b(?:(?:jr|req|r)\s)?[a-z]*\d{4,}[a-z\d]*\b')  # "(JR0286834)", "JR-2604031", "_R12345", and years
+ROLE_NOISE = {'summer', 'fall', 'autumn', 'winter', 'spring', 'referral'}
+
+
+def role_key(title):
+    """A title as a role, without what differs between postings of one role: the term ("- Summer 2027"), a
+    requisition number and "Referral" (a referral-only copy). A graduation year stays: Twitch posts one role per
+    graduating class ("(Grad Year: Winter 2027)", "(Grad Year: Spring 2028)"), each a separate application."""
+    t = norm(title)
+    grads = [' '.join(['grad'] + s.split() + [y]) for s, y in GRAD_PART.findall(t)]
+    words = [{'internship': 'intern', 'internships': 'intern', 'interns': 'intern'}.get(w, w)
+             for w in REQ_NUMBER.sub(' ', GRAD_PART.sub(' ', t)).split() if w not in ROLE_NOISE]
+    return ' '.join(words + grads)
+
+
+CITY_SAME = {'nyc': 'new york', 'new york city': 'new york', 'sf': 'san francisco'}
+STATE_NAMES = {'alabama', 'alaska', 'arizona', 'arkansas', 'california', 'colorado', 'connecticut', 'delaware', 'florida',
+               'georgia', 'hawaii', 'idaho', 'illinois', 'indiana', 'iowa', 'kansas', 'kentucky', 'louisiana', 'maine',
+               'maryland', 'massachusetts', 'michigan', 'minnesota', 'mississippi', 'missouri', 'montana', 'nebraska',
+               'nevada', 'new hampshire', 'new jersey', 'new mexico', 'north carolina', 'north dakota', 'ohio', 'oklahoma',
+               'oregon', 'pennsylvania', 'rhode island', 'south carolina', 'south dakota', 'tennessee', 'texas', 'utah',
+               'vermont', 'virginia', 'washington', 'west virginia', 'wisconsin', 'wyoming'}
+NOT_PLACE = {'us', 'usa', 'united states', 'united states of america', 'headquarters', 'hq', 'hybrid', 'onsite', 'on site',
+             'in office', 'multiple locations', 'various locations', 'nationwide'}
+
+
+def place_set(text):
+    """The cities in a location, however it's written: "Seattle, WA, Menlo Park, CA" (a queue note: places joined by
+    commas), "Hillsboro OR; Folsom/Santa Clara CA" (a tracker row), "Boston, MA (Full time)" or "USA - Massachusetts
+    - Cambridge (320 Bent Street)" (fetched postings). States, countries and work modes aren't cities."""
+    found = set()
+    text = re.sub(r'\([^)]*\)', ' ', str(text or ''))  # "(Full time)", "(Hybrid)", a street address
+    for part in re.split(r'[;,/|]|\s+-\s+|-(?=[A-Z])|\s+(?:or|and)\s+', text):
+        part = re.sub(r'\s+[A-Z]{2}$', '', part.strip())  # "Hillsboro OR"
+        n = norm(part)
+        if not n or part.upper() in STATE_CODES or n in STATE_NAMES or n in NOT_PLACE or n.isdigit():
+            continue
+        found.add(CITY_SAME.get(n, n))
+    return found
+
+
+def same_company(a, b):
+    """One company under two spellings, by whole leading words: "Veeam" and "Veeam Software", not "HP" and "HPE"."""
+    a, b = bare_name(a), bare_name(b)
+    return bool(a and b) and (a == b or a.startswith(b + ' ') or b.startswith(a + ' '))
+
+
+def workday_site(url):
+    return next((k.split(':')[1] for k in posting_keys(url) if k.startswith('workday:')), None)
+
+
+def role_posting(companies, titles, place, url, row=None):
+    """What same_role() compares. `companies` and `titles` may hold several spellings (a queue note's and the
+    fetched posting's). A Workday link's own title is added, except for a tracker row (`row`): T-Mobile posted two
+    teams as "Summer-2027-Software-Engineering-Internship" (REQ380734, REQ380739), and a tracker row's role, written
+    from the posting, can name the team where the link can't."""
+    names = [c for c in ([companies] if isinstance(companies, str) else companies) if c]
+    keys = {role_key(t) for t in list(titles) + ([] if row else [link_title(url)]) if t} - {''}
+    return {'companies': names, 'keys': keys, 'places': place_set(place), 'site': workday_site(url), 'row': row}
+
+
+def same_role(a, b):
+    """Two postings are one role: a title in common (role_key), the same company (or Workday site) and a city in
+    common. A place left blank counts as the same; different cities don't (one title per city is a real choice)."""
+    if not a['keys'] & b['keys']:
+        return False
+    if not (a['site'] and a['site'] == b['site']) and not any(same_company(x, y) for x in a['companies'] for y in b['companies']):
+        return False
+    return not a['places'] or not b['places'] or bool(a['places'] & b['places'])
+
+
+def role_index(postings):
+    index = {}
+    for p in postings:
+        for k in p['keys']:
+            index.setdefault(k, []).append(p)
+    return index
+
+
+def find_same_role(p, index):
+    """The first posting in `index` that is the same role as `p`, else None."""
+    return next((q for k in p['keys'] for q in index.get(k, []) if q is not p and same_role(p, q)), None)
+
+
+def applied_roles(rows):
+    """role_index of the tracker rows the user applied to or is applying to. Skipped rows don't count: a closed
+    posting's twin is worth a try."""
+    return role_index(role_posting(r.get('company'), [r.get('role')], r.get('location'), r.get('posting_url'), r)
+                      for r in rows if str(r.get('status') or '').strip().lower() != 'skipped')
+
+
+def note_parts(line):
+    """(link, company, title, place) of a jobs.txt line with a note ("<link>  # Company | Title | Place | ..."), else None."""
+    m = re.search(r'https?://\S+', line)
+    rest = line[m.end():] if m else ''
+    if not m or '#' not in rest:
+        return None
+    parts = [p.strip() for p in rest.split('#', 1)[1].split('|')] + ['', '']
+    return m.group(0), parts[0], parts[1], parts[2] if not re.match(r'(posted|fame|picked|held|skipped)\b', parts[2]) else ''
+
+
 # ---- queue order: best-known companies first ----
 
 # Level 1: big tech, AI labs, top trading firms and household names. Seeded with every company SimplifyJobs (its
@@ -626,7 +738,8 @@ def tidy(folder):
 
     The top of the queue goes stale when a run forgets to move what it processed, and each batch then re-checked
     every pick against tracker.xlsx with one-off scripts. Matching uses the link, its job ID, and the company and
-    role from the line's note (any status counts, Skipped included). Lines whose title isn't a kind of role
+    role from the line's note (any status counts, Skipped included), then same_role() against the rows not Skipped
+    (another requisition of a role already applied to). Lines whose title isn't a kind of role
     profile.json's roleTypes asks for, or names another term ("Spring 2027 Co-op"), go too; batches had done that
     by hand over several rounds. Lines are moved, never deleted. Then the queue is sorted (sort_queue) from the
     fame tags already in the notes.
@@ -642,6 +755,7 @@ def tidy(folder):
     profile = load_profile(folder)
     us_only = home_is_us(profile)  # the user's call (2026-11-08): batches skip jobs outside the U.S.
     wanted, term = wanted_roles(profile), profile_term(profile)
+    applied = applied_roles({id(r): r for r in tracked.values()}.values())
     for line in lines[:done_at]:
         m = re.search(r'https?://\S+', line)
         if not m:
@@ -652,11 +766,18 @@ def tidy(folder):
         parts = [p.strip() for p in note.split('|')]
         links = posting_keys(m.group(0), parts[0] if note else None)
         # The same title at the same company counts as applied (the tracker row), but two queued lines count as
-        # duplicates only by link or job ID: one title is often posted separately per city (Chicago, London).
+        # duplicates only by link or job ID: one title is often posted separately per city (Chicago, London), and
+        # when one of two same-city copies closes the other is still worth having (the picker takes one at a time).
         named = {name_key(parts[0], parts[1])} - {None} if len(parts) > 1 else set()
         hit = next((tracked[k] for k in links | named if k in tracked), None)
+        q = note_parts(line)
+        twin = find_same_role(role_posting(q[1], [q[2]], q[3], q[0]), applied) if q and q[2] else None
         if hit:
             moved.append((line, note or m.group(0), f"in tracker: {hit['id']} {hit['status']}".strip()))
+        elif twin:
+            r = twin['row']
+            moved.append((line.rstrip() + f" | skipped: same role as tracker {r['id']} ({r['status']})", note,
+                          f"in tracker: same role as {r['id']} {r['status']}"))
         elif links & seen:
             moved.append((line, note or m.group(0), 'listed twice'))
         elif us_only and len(parts) > 2 and outside_us(parts[2]):
@@ -683,6 +804,7 @@ def tidy(folder):
     shown = [f'{n[:80]} ({why})' for _, n, why in moved[:10]]
     return {'ok': True, **sort_summary(merged), 'moved_below_done': len(moved),
             'in_tracker': sum(1 for *_, why in moved if why.startswith('in tracker')),
+            'same_role_in_tracker': sum(1 for *_, why in moved if why.startswith('in tracker: same role')),
             'listed_twice': sum(1 for *_, why in moved if why == 'listed twice'),
             'not_in_us': sum(1 for *_, why in moved if why == 'not in the U.S.'),
             'not_a_wanted_role': sum(1 for *_, why in moved if why == 'not a wanted role'),
@@ -860,11 +982,17 @@ def main():
     tracked = tracker_index(folder)  # after the downloads: it holds the tracker's lock until this process exits
     jobs_path = os.path.join(folder, 'jobs.txt')
     queued, lines = jobs_keys(jobs_path)
+    # Roles to leave out under another link: applied to (tracker rows not Skipped), or waiting in the queue above
+    # '# done' (a line below it was handled; a closed posting's twin is still worth adding).
+    applied = applied_roles({id(r): r for r in tracked.values()}.values())
+    done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
+    waiting = role_index(role_posting(q[1], [q[2]], q[3], q[0]) for q in map(note_parts, lines[:done_at]) if q and q[2])
     kw = [norm(k) for k in a.keyword]
     ex = [norm(k) for k in a.exclude_keyword]
 
     skipped = {'linkedin_link': 0, 'closed': 0, 'term': 0, 'not_internship': 0, 'category': 0, 'role': 0, 'skip_list': 0, 'location': 0, 'outside_us': 0,
-               'keyword': 0, 'degree': 0, 'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0}
+               'keyword': 0, 'degree': 0, 'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0,
+               'same_role_applied': 0, 'same_role_queued': 0}
     wanted, skips = wanted_roles(profile), skip_names(profile)
     if wanted:
         defaults_used['roles'] = role_words(wanted)
@@ -908,6 +1036,11 @@ def main():
             skipped['already_tracked'] += 1; continue
         if keys & queued:
             skipped['already_in_jobs_txt'] += 1; continue
+        here = role_posting(x.get('company_name'), [x.get('title')], ', '.join(x.get('locations') or []), x.get('url'))
+        if find_same_role(here, applied):
+            skipped['same_role_applied'] += 1; continue
+        if find_same_role(here, waiting):
+            skipped['same_role_queued'] += 1; continue
         results.append(x)
 
     results.sort(key=lambda x: -(x.get('date_posted') or 0))

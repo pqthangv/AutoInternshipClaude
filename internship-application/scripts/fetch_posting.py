@@ -7,8 +7,9 @@ Usage:
   python fetch_posting.py --jobs jobs.txt --pick N --out-dir DIR --profile profile.json [--tracker tracker.xlsx]
 
 --pick goes down the queue until N postings are ready for one batch: it passes over lines the user held or whose
-company is in profile.json's skipCompanies, moves screen skips and titles of other kinds of role (roleTypes) or
-another term below "# done", and holds a third posting from one company, a second from one iCIMS site, and one
+company is in profile.json's skipCompanies or that repeat a role picked today under another link, moves screen
+skips, titles of other kinds of role (roleTypes) or another term, and other links to a role already in the tracker
+below "# done", and holds a third posting from one company, a second from one iCIMS site, and one
 past an application limit its company states. The same call again on the same day refills a batch whose postings
 dropped out later: it passes over what the earlier calls picked and counts them toward the limits. See pick_batch().
 
@@ -66,6 +67,8 @@ import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import find_internships as fi  # noqa: E402  (the queue search: one reading of roles, companies and places for both)
 
 
 class Failed(Exception):
@@ -1189,11 +1192,6 @@ def as_markdown(url, site, p):
     return '\n'.join(lines) + '\n'
 
 
-def role_key(title):
-    """A title without its term ("Software Engineer Intern - Summer 2027" is "software engineer intern")."""
-    return ' '.join(w for w in norm(title).split() if not re.fullmatch(r'20\d\d|summer|fall|autumn|winter|spring', w))
-
-
 def file_name(n, p):
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', f"{n:02d} {p['company']} - {p['role']}")
     return re.sub(r'\s+', ' ', name).strip()[:90].rstrip(' .') + '.md'
@@ -1229,8 +1227,9 @@ def queue(path):
     return urls
 
 
-def fetch_item(n, url, out_dir, status, rows, blocked):
-    """Fetch one posting, write its file and screen it: (its entry in the output, the posting's data or None)."""
+def fetch_item(n, url, out_dir, status, rows, blocked, note_company=None):
+    """Fetch one posting, write its file and screen it: (its entry in the output, the posting's data or None).
+    `note_company` is the queue note's name for the company, which the tracker check also tries."""
     site, ids = parse(url)
     item = {'url': url, 'site': site or 'other'}
     p = None
@@ -1266,17 +1265,19 @@ def fetch_item(n, url, out_dir, status, rows, blocked):
                                                                or norm(r.get('company')) in norm(p['company']))]
             key = url_key(url)
             hits = [r for r in rows if url_key(r.get('posting_url')) == key] if key else []
-            if same or hits:
-                item['in_tracker'] = [{k: r.get(k) for k in ('id', 'role', 'status', 'date_added')} for r in {r['id']: r for r in same + hits}.values()]
+            # The same role under another link: Shield AI's "June 2027 Co-Op - Software Engineer Intern" moved from
+            # Lever to Ashby; DraftKings posted one Analyst Intern as JR15147 and JR15148, and its Workday names the
+            # company "Crown Holdings", so the note's company and the Workday site count too (fi.same_role). Only
+            # the fetched title counts here: the lists shorten titles, which could match another role.
+            twin = fi.find_same_role(fi.role_posting([p['company'], note_company], [p['role']], p['location'], url),
+                                     fi.applied_roles(rows))
+            found = same + hits + ([twin['row']] if twin else [])
+            if found:
+                item['in_tracker'] = [{k: r.get(k) for k in ('id', 'role', 'status', 'date_added')} for r in {r['id']: r for r in found}.values()]
                 item['same_posting_in_tracker'] = bool(hits)
-                # The same title at the company under another link and another note title: Shield AI's "June 2027
-                # Co-Op - Software Engineer Intern" moved from Lever to Ashby, and a list called it "Software Engineer Intern Co-op".
-                # Skipped rows don't count: a closed posting's repost is worth screening again. The company has to be
-                # the same by whole words (same_company): `same` above lets "HP" match "HPE".
-                role = role_key(p['role'])
-                if role and any(same_company(r.get('company'), p['company']) and role_key(r.get('role')) == role
-                                and str(r.get('status') or '').strip().lower() != 'skipped' for r in same):
+                if twin:
                     item['same_role_in_tracker'] = True
+                    item['same_role_as'] = twin['row'].get('id')
     except Failed as e:
         p = None
         item.update({'ok': False, 'error': str(e)})
@@ -1348,8 +1349,7 @@ def picked_on(parts, day):
 
 def same_company(a, b):
     """One company under two spellings: "Northwind" and "Northwind Labs" (a note's name and the posting's)."""
-    a, b = norm(a), norm(b)
-    return bool(a and b) and (a == b or a.startswith(b + ' ') or b.startswith(a + ' '))
+    return fi.same_company(a, b)
 
 
 def applied_count(rows, company, days=None):
@@ -1389,13 +1389,17 @@ def pick_batch(a, status, rows, tracker_note):
     and 10 went ahead with 4, 2 and 4. A later call that day passes over the lines the earlier ones marked, counts
     them toward the caps, and numbers its files and `order` after the earlier calls' (kept in out_dir).
     """
-    sys.path.insert(0, HERE)
-    import find_internships as fi
     prof = json.load(open(a.profile, encoding='utf-8-sig'))
     wanted, skips, term = fi.wanted_roles(prof), fi.skip_names(prof), fi.profile_term(prof)
     today = dt.date.today()
     rows = rows or []
     recent = fi.recent_counts({i: r for i, r in enumerate(rows)})
+    applied = fi.applied_roles(rows)
+    today_roles = {}  # fi.role_index of the lines picked today, this call's included
+
+    def add_role(posting):
+        for k in posting['keys']:
+            today_roles.setdefault(k, []).append(posting)
     lines = open(a.jobs, encoding='utf-8-sig').read().splitlines()
     done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
     top = lines[:done_at]
@@ -1431,6 +1435,8 @@ def pick_batch(a, status, rows, tracker_note):
         mark = picked_on([x.strip() for x in m.group(2).split('|')], day) if m else None
         if mark:
             taken.append(m.group(2).split('|')[0].strip() or m.group(1))
+            q = fi.note_parts(line)
+            add_role(fi.role_posting(q[1], [q[2]], q[3], q[0]))
             site, ids = parse(m.group(1))
             if mark.group(2):
                 hosts.add(mark.group(2))
@@ -1470,6 +1476,16 @@ def pick_batch(a, status, rows, tracker_note):
         if title and title_early(title, status) == 'skip':
             moved[i] = f"starts before {status['available_text']}"
             continue
+        # Another requisition of a role applied to, or of one picked today (DraftKings' JR15148 after JR15147). The
+        # second kind stays in the queue: if the picked one turns out closed, this one is the way in.
+        place = (fi.note_parts(line) or ('', '', '', ''))[3]
+        here = fi.role_posting(company, [title], place, url) if title else None
+        if here and fi.find_same_role(here, applied):
+            moved[i] = 'same role already in the tracker'
+            continue
+        if here and fi.find_same_role(here, today_roles):
+            passed['same role picked today'] = passed.get('same role picked today', 0) + 1
+            continue
         lim =next((re.match(r'held: limit (\d+)(?: per (\d+) days)?', h) for h in holds if h.startswith('held: limit')), None)
         if lim and company and applied_count(rows, company, int(lim.group(2)) if lim.group(2) else None) >= int(lim.group(1)):
             held.append(f'{who} (its posting allows {lim.group(1)} applications)')  # recounted from the tracker, not fetched again
@@ -1486,17 +1502,25 @@ def pick_batch(a, status, rows, tracker_note):
             stopped = 'fetch limit'
             break
         attempts += 1
-        item, p = fetch_item(start + attempts, url, a.out_dir, status, rows, blocked)
+        item, p = fetch_item(start + attempts, url, a.out_dir, status, rows, blocked, company)
         if not item.get('ok') and company:  # unread postings: the queue's note says what they are
             item.update({'company': company, 'role': title, 'from_note': True})
         if item.get('screen') == 'skip':
             moved[i] = item['screen_why'][0].split(':')[0]
             continue
-        if item.get('same_posting_in_tracker') or item.get('same_role_in_tracker'):
+        if item.get('same_posting_in_tracker'):
             moved[i] = 'already in the tracker'
+            continue
+        if item.get('same_role_in_tracker'):
+            moved[i] = 'same role already in the tracker'
             continue
         name = company or (p or {}).get('company') or ''
         if p:
+            # Among today's picks the note's title counts too: passing over a twin only lasts until tomorrow.
+            here = fi.role_posting([company, p['company']], [p['role'], title], p['location'] or place, url)
+            if fi.find_same_role(here, today_roles):
+                passed['same role picked today'] = passed.get('same role picked today', 0) + 1
+                continue
             if fi.role_fits(p['role'], wanted) is False:
                 moved[i] = not_role
                 continue
@@ -1527,6 +1551,7 @@ def pick_batch(a, status, rows, tracker_note):
             continue
         changed[i] = with_tag(line, f'picked {day}' + (f' iCIMS {icims_host}' if icims_host and icims_host != host else ''))
         taken.append(name or url)
+        add_role(here or fi.role_posting([company, name], [item.get('role')], place, url))
         if icims_host:
             hosts.add(icims_host)
         item['order'] = start + attempts  # queue order across picks and to_judge: a check that passes takes its place in line
