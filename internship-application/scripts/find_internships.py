@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Find internships from the SimplifyJobs and speedyapply lists and queue them in jobs.txt.
+"""Find internships from the SimplifyJobs, speedyapply and vanshb03 lists and queue them in jobs.txt.
 
-Sources (updated daily): the data file behind https://github.com/SimplifyJobs/Summer2027-Internships, and the U.S.
-internship tables of https://github.com/speedyapply/2027-SWE-College-Jobs and .../2027-AI-College-Jobs. A job on
-more than one list is taken from SimplifyJobs (it has the term, degree and sponsorship fields). speedyapply has
-none of those: a title naming another term or a graduate degree is dropped, and sponsorship is left to
-fetch_posting.py --profile.
+Sources (updated daily): the data file behind https://github.com/SimplifyJobs/Summer2027-Internships, the U.S.
+internship tables of https://github.com/speedyapply/2027-SWE-College-Jobs and .../2027-AI-College-Jobs, and the data
+file behind https://github.com/vanshb03/Summer2027-Internships. A job on more than one list is taken from
+SimplifyJobs (it has the term, degree and sponsorship fields), then speedyapply. speedyapply has none of those: a
+title naming another term or a graduate degree is dropped, and sponsorship is left to fetch_posting.py --profile.
+vanshb03 has a season without a year and short links: see VANSH. A SimplifyJobs listing whose term is "N/A" is kept
+when another list confirms it or it's recent with a fitting title: see NA_DAYS.
 
 Usage:
   python find_internships.py --folder "JOB_SEARCH_FOLDER" [filters] [--append]
@@ -53,6 +55,8 @@ import os
 import re
 import sys
 import tempfile
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -66,6 +70,23 @@ SPEEDY = [
     {'name': 'speedyapply AI', 'repo': 'https://github.com/speedyapply/2027-AI-College-Jobs', 'category': 'AI/ML/Data',
      'url': 'https://raw.githubusercontent.com/speedyapply/2027-AI-College-Jobs/main/README.md', 'cache': 'speedyapply-2027-ai.md'},
 ]
+# vanshb03's list: SimplifyJobs' older format ("season" without a year, no category or degree fields), still holding
+# open entries posted as far back as 2015, so only ones posted since August of the year before count. Every url is a
+# go.vansh.nyc short link whose real address only that service knows (its golinks.py): a job is looked up there only
+# when it passes every filter and no other list has it, in date order until the run's limit, and the answer is kept
+# in the temp folder. On 2026-11-20 it had 2,504 open entries; after the user's filters about 640 weren't on the other
+# lists by title, and of 40 looked up, 24 were really new (the rest were there under another title).
+VANSH = {'name': 'vanshb03', 'repo': 'https://github.com/vanshb03/Summer2027-Internships', 'year': 2027,
+         'url': 'https://raw.githubusercontent.com/vanshb03/Summer2027-Internships/dev/.github/scripts/listings.json',
+         'cache': 'vanshb03-summer2027-listings.json', 'links': 'vanshb03-golinks.json'}
+GO_LINK = re.compile(r'^https?://go\.vansh\.nyc/[0-9A-Za-z]{1,8}/?$')
+# SimplifyJobs leaves a listing's term "N/A" when it couldn't tell: 1,308 open on 2026-11-20, posted mostly in October
+# and November, and none of them on its own Summer 2027 page. One that speedyapply (2027 internships only) or
+# vanshb03 (for the user's season) also lists is taken; one no other list confirms only when it's under NA_DAYS old
+# and its title clearly fits the user's roleTypes (the user's call). Of 40 unconfirmed ones read that day, 1 said
+# Summer 2027, 5 were part-time or year-round during school, 9 didn't say, 23 needed the browser; older ones were
+# rarely confirmed (24% past 50 days, against 50-66% younger), so they're mostly off-season or stale.
+NA_DAYS = 50
 CATEGORIES = {
     'software': {'Software', 'Software Engineering'},
     'data': {'AI/ML/Data', 'Data Science, AI & Machine Learning'},
@@ -827,8 +848,9 @@ def download(url, cache_name):
 
 
 def fetch():
-    """(SimplifyJobs listings, speedyapply rows, the lists that failed). Exits only when every list failed."""
-    failed, simplify, speedy = [], [], []
+    """(SimplifyJobs listings, speedyapply rows, vanshb03 rows, the lists that failed). Exits only when every list
+    failed."""
+    failed, simplify, speedy, vansh = [], [], [], []
     try:
         simplify = json.loads(download(SOURCE, 'simplify-summer2027-listings.json'))
     except Exception as e:
@@ -841,10 +863,63 @@ def fetch():
             speedy += rows
         except Exception as e:
             failed.append({'source': src['repo'], 'error': str(e)})
-    if not simplify and not speedy:
+    try:
+        vansh = vansh_rows(json.loads(download(VANSH['url'], VANSH['cache'])))
+    except Exception as e:
+        failed.append({'source': VANSH['repo'], 'error': str(e)})
+    if not simplify and not speedy and not vansh:
         out({'ok': False, 'code': 'NETWORK', 'error': 'Could not download any job list: ' + '; '.join(f"{f['source']}: {f['error']}" for f in failed),
              'hint': f'Allow raw.githubusercontent.com in network settings, or open {REPO} in the browser and read the table there.'}, 6)
-    return simplify, speedy, failed
+    return simplify, speedy, vansh, failed
+
+
+KIND_CATEGORY = {'software': 'Software', 'data': 'AI/ML/Data', 'hardware': 'Hardware', 'product': 'Product', 'quant': 'Quant'}
+
+
+def vansh_rows(data):
+    """vanshb03's open entries posted since August of the year before its term, shaped like SimplifyJobs' (a term with
+    the list's year, a category from the title's words for --category)."""
+    since = dt.datetime(VANSH['year'] - 1, 8, 1).timestamp()
+    rows = []
+    for x in data:
+        if not x.get('active') or not x.get('is_visible', True) or (x.get('date_posted') or 0) < since:
+            continue
+        strong, weak = role_kinds(x.get('title'))
+        kind = next((k for k in KIND_CATEGORY if k in strong), None) or next((k for k in KIND_CATEGORY if k in weak), None)
+        rows.append(dict(x, terms=[f"{x['season']} {VANSH['year']}"] if x.get('season') else None,
+                         category=KIND_CATEGORY.get(kind), degrees=[], source=VANSH['name']))
+    return rows
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def go_target(url, links, stats):
+    """The address a go.vansh.nyc link sends to, from `links` (the cache) or one request to that service, else None."""
+    if url in links:
+        return links[url]
+    opener, at = urllib.request.build_opener(NoRedirect), url
+    try:
+        for _ in range(3):  # a link may point at another go link
+            time.sleep(0.5)  # one service, so lookups go one at a time
+            try:
+                opener.open(urllib.request.Request(at, headers={'User-Agent': 'internship-application-skill'}), timeout=10)
+                break  # no redirect: not a link we can follow
+            except urllib.error.HTTPError as e:
+                nxt = e.headers.get('Location') if 300 <= e.code < 400 else None
+                if not nxt:
+                    break
+                at = urllib.parse.urljoin(at, nxt)
+                if not GO_LINK.match(at):
+                    links[url] = at
+                    stats['looked_up'] += 1
+                    return at
+    except Exception:
+        pass
+    stats['lookup_failed'] += 1
+    return None
 
 
 TABLE = re.compile(r'<!-- TABLE_(?:(FAANG|QUANT)_)?START -->(.*?)<!-- TABLE_(?:FAANG_|QUANT_)?END -->', re.S)
@@ -910,7 +985,7 @@ def main():
         jobs_path = os.path.join(folder, 'jobs.txt')
         if not os.path.exists(jobs_path):
             out({'ok': False, 'error': f'no jobs.txt in {folder}'}, 1)
-        simplify, speedy, failed = fetch()
+        simplify, speedy, _, failed = fetch()
         table = fame_table(simplify, speedy)
         tracked = tracker_index(folder)  # after the downloads (it holds the tracker's lock until exit)
         lines = open(jobs_path, encoding='utf-8').read().splitlines()
@@ -952,7 +1027,8 @@ def main():
             out({'ok': False, 'error': f'unknown category: {c}', 'categories': ['software', 'data', 'hardware', 'product', 'quant']}, 1)
         cats |= CATEGORIES[key]
 
-    simplify, speedy, failed = fetch()
+    simplify, speedy, vansh, failed = fetch()
+    wanted, skips = wanted_roles(profile), skip_names(profile)
     # A job on both lists is taken from SimplifyJobs. A closed SimplifyJobs entry matches only by link or job ID:
     # by company and title, an old closed posting would hide this year's open one.
     all_links, open_links, open_names = set(), set(), set()
@@ -978,6 +1054,36 @@ def main():
         seen_speedy |= keys | named
     counted['added_by_speedyapply'] = len(extra)
 
+    # vanshb03's links say nothing (short links), so a row the other lists have is found by company and title or as
+    # the same role; those rows only confirm a SimplifyJobs term below. The rest are looked up after filtering.
+    as_role = lambda x: role_posting(x.get('company_name'), [x.get('title')], ', '.join(x.get('locations') or []), x.get('url'))
+    listed = role_index(as_role(x) for x in simplify + speedy if x.get('active', True) and x.get('is_visible', True))
+    vansh_extra, vansh_count = [], {'rows': len(vansh), 'on_other_lists': 0}
+    for x in vansh:
+        if name_key(x['company_name'], x['title']) in open_names | seen_speedy or find_same_role(as_role(x), listed):
+            vansh_count['on_other_lists'] += 1
+        else:
+            vansh_extra.append(x)
+    # SimplifyJobs' "N/A" terms (NA_DAYS): confirmed by another list, or recent with a title that clearly fits; not one
+    # vanshb03 lists for another season.
+    confirm = role_index([as_role(x) for x in speedy] + [as_role(x) for x in vansh if term in (x.get('terms') or [])])
+    elsewhen = role_index(as_role(x) for x in vansh if x.get('terms') and term not in x['terms'])
+    na = {'confirmed_by_another_list': 0, 'recent_and_fitting': 0, 'other_season_on_vanshb03': 0, 'left_out': 0}
+    recent = (dt.datetime.now() - dt.timedelta(days=NA_DAYS)).timestamp()
+    for x in simplify:
+        if x.get('terms') != ['N/A'] or not x.get('active') or not x.get('is_visible', True):
+            continue
+        if posting_keys(x.get('url'), x.get('company_name')) & seen_speedy or find_same_role(as_role(x), confirm):
+            x['terms'] = None  # the title decides, as for speedyapply's rows
+            na['confirmed_by_another_list'] += 1
+        elif find_same_role(as_role(x), elsewhen):
+            na['other_season_on_vanshb03'] += 1
+        elif (x.get('date_posted') or 0) >= recent and role_fits(x.get('title'), wanted) is True:
+            x['terms'] = None
+            na['recent_and_fitting'] += 1
+        else:
+            na['left_out'] += 1
+
     cutoff = (dt.datetime.now() - dt.timedelta(days=a.days)).timestamp() if a.days else None
     tracked = tracker_index(folder)  # after the downloads: it holds the tracker's lock until this process exits
     jobs_path = os.path.join(folder, 'jobs.txt')
@@ -993,14 +1099,13 @@ def main():
     skipped = {'linkedin_link': 0, 'closed': 0, 'term': 0, 'not_internship': 0, 'category': 0, 'role': 0, 'skip_list': 0, 'location': 0, 'outside_us': 0,
                'keyword': 0, 'degree': 0, 'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0,
                'same_role_applied': 0, 'same_role_queued': 0}
-    wanted, skips = wanted_roles(profile), skip_names(profile)
     if wanted:
         defaults_used['roles'] = role_words(wanted)
     if skips:
         defaults_used['skip_companies'] = sorted(skips)
     us_only = home_is_us(profile) and not a.include_abroad
     results = []
-    for x in simplify + extra:
+    for x in simplify + extra + vansh_extra:
         if 'linkedin.com' in (x.get('url') or '').lower():  # never queue LinkedIn; apply on the company's site
             skipped['linkedin_link'] += 1; continue
         if not x.get('active') or not x.get('is_visible', True):
@@ -1051,14 +1156,49 @@ def main():
             seen.add(key)
             unique.append(x)
     skipped['duplicate_listing'] = len(results) - len(unique)
-    results = unique
-    total_matches = len(results)
+    # vanshb03's rows get their real link here, newest first, only until the limit is reached; one whose real link a
+    # list, the tracker or the queue already has is dropped, and so is one that leads to LinkedIn.
+    links_path = os.path.join(tempfile.gettempdir(), VANSH['links'])
+    try:
+        go_links = json.load(open(links_path, encoding='utf-8'))
+    except (OSError, ValueError):
+        go_links = {}
+    vansh_count.update(looked_up=0, lookup_failed=0, known_after_lookup=0, not_looked_up=0)
+    results, known = [], all_links | tracked.keys() | queued | {k for x in speedy for k in posting_keys(x['url'], x['company_name'])}
+    failed_in_a_row = 0  # a blocked or hanging service: stop after three, so the run neither stalls nor fails quietly
+    for x in unique:
+        if not GO_LINK.match(str(x.get('url') or '')):
+            results.append(x)
+            continue
+        if len(results) >= a.limit or failed_in_a_row >= 3:
+            vansh_count['not_looked_up'] += 1
+            continue
+        before = vansh_count['lookup_failed']
+        real = go_target(x['url'], go_links, vansh_count)
+        failed_in_a_row = failed_in_a_row + 1 if vansh_count['lookup_failed'] > before else 0
+        if failed_in_a_row >= 3:
+            vansh_count['hint'] = ("Couldn't reach go.vansh.nyc, which vanshb03's links go through, so its jobs were left out. "
+                                   "To add them, allow go.vansh.nyc in the Claude app's settings for code execution (network access).")
+        here = role_posting(x['company_name'], [x['title']], ', '.join(x.get('locations') or []), real)
+        if real and ('linkedin.com' in real.lower() or posting_keys(real, x['company_name']) & known
+                     or find_same_role(here, applied) or find_same_role(here, waiting)):
+            vansh_count['known_after_lookup'] += 1
+        elif real:
+            results.append(dict(x, url=real))
+    if go_links:
+        try:
+            json.dump(go_links, open(links_path, 'w', encoding='utf-8'))  # temp folder only
+        except OSError:
+            pass
+    vansh_count['added'] = sum(1 for x in results if x.get('source') == VANSH['name'])
+    # Rows not looked up are counted as matches: most are new (24 of 40 were, 2026-11-20).
+    total_matches = len(results) + vansh_count['not_looked_up']
     results = results[:a.limit]
     listings = [{
         'company': x['company_name'], 'role': x['title'], 'locations': x.get('locations', []),
         'posted': dt.date.fromtimestamp(x['date_posted']).isoformat() if x.get('date_posted') else '',
         'category': x.get('category'), 'degrees': x.get('degrees', []), 'sponsorship': x.get('sponsorship'),
-        'url': x.get('url'), 'source': x['source'] if str(x.get('source') or '').startswith('speedyapply') else 'SimplifyJobs',
+        'url': x.get('url'), 'source': x['source'] if str(x.get('source') or '').startswith(('speedyapply', VANSH['name'])) else 'SimplifyJobs',
     } for x in results]
 
     added, order = 0, {}
@@ -1077,8 +1217,8 @@ def main():
         added, order = len(new_lines), sort_summary(merged)
 
     down = {f['source'] for f in failed}
-    out({'ok': True, 'sources': [r for r in [REPO] + [s['repo'] for s in SPEEDY] if r not in down], 'sources_failed': failed,
-         'speedyapply': counted, 'term': term, 'filters': {
+    out({'ok': True, 'sources': [r for r in [REPO] + [s['repo'] for s in SPEEDY] + [VANSH['repo']] if r not in down], 'sources_failed': failed,
+         'speedyapply': counted, 'vanshb03': vansh_count, 'simplifyjobs_na_terms': na, 'term': term, 'filters': {
         'categories': a.category, 'locations': a.location, 'keywords': a.keyword, 'exclude_keywords': a.exclude_keyword,
         'degree': degree, 'drop_no_sponsorship_postings': drop_no_sponsor,
         'drop_citizenship_required': drop_citizenship, 'below_senior': below, 'days': a.days}, 'defaults_from_profile': defaults_used,

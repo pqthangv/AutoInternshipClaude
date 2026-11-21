@@ -26,7 +26,8 @@ browser as before. LinkedIn is never read.
 authorization, citizenship, U.S. person status or a clearance the user can't have, a graduate-only role for an
 undergraduate, a set start date before availableFrom, in the text or as work months in the title, a posting the
 site says no longer exists), "check" for wording a person should judge (a minimum length longer than availableFrom
-to availableUntil among them), else "ok", with the sentences behind it. Sponsorship alone never skips: below
+to availableUntil, or work in the school year for a user free only in the summer, among them), else "ok", with the
+sentences behind it. Sponsorship alone never skips: below
 senior year it doesn't stop an application (SKILL.md step 2). --move-skips (with --jobs) moves skipped lines
 below "# done" with the reason, so no batch picks them again. Batch 2026-11-08 spent $2.41 of $17.76 on four
 tailoring agents for postings that were then skipped.
@@ -903,13 +904,21 @@ def early_start(low, st):
 # whose posting text says only "Work Period: May through August").
 MONTH_NAME = (r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|'
               r'oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)')
-TITLE_MONTHS = re.compile(rf'\b{MONTH_NAME}\.?\s*(?:-|–|—|to|through|thru)\s*{MONTH_NAME}\b')
+# A year may follow either month: "AI Security Research Intern - (September 2026 – May 2027)" (Carnegie Mellon,
+# 2026-11-20) went through as months alone, which read as September to May of the term's year.
+TITLE_MONTHS = re.compile(rf'\b{MONTH_NAME}\.?\s*(20\d\d)?\s*(?:-|–|—|to|through|thru)\s*{MONTH_NAME}\.?\s*(20\d\d)?\b')
 
 
 def title_early(title, st):
-    """early_start() on the work months a title names, else None."""
+    """early_start() on the work months a title names, else None. A range that wraps past December without a first
+    year ("September - May 2027") starts the year before its end."""
     m = TITLE_MONTHS.search(undotted(str(title or '')).lower())
-    return early_start(f'runs from {m.group(1)} to {m.group(2)}', st) if m else None
+    if not m:
+        return None
+    start, y1, end, y2 = m.groups()
+    if not y1 and MONTH_ABBR.index(start[:3]) > MONTH_ABBR.index(end[:3]):
+        y1 = str(int(y2 or st.get('year') or dt.date.today().year) - 1)
+    return early_start(f"runs from {start} {y1 or ''} to {end} {y2 or ''}", st)
 
 
 # A length the user's window (availableFrom to availableUntil) is too short for: "Available for a 4+ month co-op"
@@ -942,6 +951,40 @@ def too_long(text, st, title=False):
         if n * (30 if months else 7) > (last - first).days + 8:  # a week's slack: "4 months" isn't 4 x 30 days exactly
             return f"{n}{'+' if m.group(2) else ''} {'months' if months else 'weeks'}"
     return None
+
+
+# An internship worked part-time or through the school year, which a user free only for the summer can't do: "This
+# is a year-round, Full or Part -Time, flexible internship based on school schedule" (Navy Federal), "expected to
+# start as soon as possible in 2027 on part-time hours (10-20 hours a week)" (Live Nation). From 40 SimplifyJobs "N/A"
+# listings read on 2026-11-20, 5 were this kind (a sixth, "Flexible schedule, up to 20 hours per week", says nothing
+# about when). Part-time hours in the summer are no conflict ("15-20 hours a week for 10-12 weeks" in a summer
+# program), so only work in the school year or a job called part-time counts. Not counted, from 1,102 saved postings:
+# Workday's "(Part time)" after the location (many companies' summer internships carry it), "full or part-time
+# enrollment", a "year-round ... awards program", a summer internship that may go on part-time afterwards or where fall
+# work is "preferred". Only ever a check.
+YEAR_ROUND = re.compile(r'\byear[- ]round\b|\b(during|throughout) the (school|academic) year\b|\b(during|throughout) the (fall|spring) '
+                        r'(semester|term)s?\b|\b(based on|around) (your |their |the )?(school|class) schedules?\b|'
+                        r'\baround (your |their |the )?academic calendar\b')  # not "start dates (depending on your academic calendar)"
+PART_TIME = re.compile(r'\bpart[- ]?time\b')
+PART_TIME_JOB = re.compile(r'\bpart[- ]?time\b[^.]{0,25}\b(position|role|job|internship|intern|basis|hours|employment|assignment|temporary)\b'
+                           r'|\b(position|role|job|internship|employment type)\b[^.]{0,25}\bpart[- ]?time\b')
+NOT_JOB = re.compile(r'\b(enroll\w*|baccalaureate|degree|student status)\b')
+OPTIONAL = re.compile(r'\b(may|might|could|can|option\w*|opportunit\w*|possibilit\w*|possibly|potential\w*|extend\w*|continu\w*|prefer\w*|'
+                      r'after the summer|following the summer)\b')
+JOB_WORDS = re.compile(r'\b(intern\w*|co-?op|position|role|job|work\w*|schedule|hours)\b')
+
+
+def part_time(low):
+    """True when a sentence says the internship is worked through the school year or is a part-time job."""
+    if OPTIONAL.search(low) or NOT_JOB.search(low):
+        return False
+    return bool((YEAR_ROUND.search(low) and JOB_WORDS.search(low)) or PART_TIME_JOB.search(low))
+
+
+def summer_only(st):
+    """The user can work only a short window (availableFrom to availableUntil, a summer)."""
+    first, last = st.get('available_from'), st.get('available_until')
+    return bool(first and last and (last - first).days <= 150)
 
 
 REQUIRED_HEAD =re.compile(r'\b(required|requirements|minimum|basic|must have|what you need|you must|eligibility)\b', re.I)
@@ -990,6 +1033,9 @@ def screen(p, st):
     length = too_long(title, st, title=True)
     if length:
         hits.append(('check', f"lasts {length}, longer than {st['available_text']} to {st['available_until_text']}", p['role']))
+    summer = summer_only(st)
+    if summer and (YEAR_ROUND.search(title) or PART_TIME.search(title)):  # "Intern - Year Round", "Part-Time Student"
+        hits.append(('check', 'part-time or year-round', p['role']))
 
     prev = ''
     for s, preferred, required in sentences(html.unescape(p['description'] or '')):  # some job data is escaped twice ("&#xa;")
@@ -1057,6 +1103,8 @@ def screen(p, st):
         length = too_long(low, st)
         if length:
             hits.append(('check', f"lasts {length}, longer than {st['available_text']} to {st['available_until_text']}", s))
+        if summer and part_time(low):
+            hits.append(('check', 'part-time or year-round', s))
         # Under a "Preferred" heading only a degree line is plainly a preference; an export-control or citizenship
         # paragraph at the end of a posting often has no heading of its own, so it becomes a check, not a skip.
         if preferred and len(hits) > before and hits[-1][0] == 'skip':
