@@ -7,8 +7,9 @@ Usage:
   python fetch_posting.py --jobs jobs.txt --pick N --out-dir DIR --profile profile.json [--tracker tracker.xlsx]
 
 --pick goes down the queue until N postings are ready for one batch: it passes over lines the user held or whose
-company is in profile.json's skipCompanies, moves screen skips and titles of other kinds of role (roleTypes) or
-another term below "# done", and holds a third posting from one company, a second from one iCIMS site, and one
+company is in profile.json's skipCompanies or that repeat a role picked today under another link, moves screen
+skips, titles of other kinds of role (roleTypes) or another term, and other links to a role already in the tracker
+below "# done", and holds a third posting from one company, a second from one iCIMS site, and one
 past an application limit its company states. The same call again on the same day refills a batch whose postings
 dropped out later: it passes over what the earlier calls picked and counts them toward the limits. See pick_batch().
 
@@ -25,7 +26,8 @@ browser as before. LinkedIn is never read.
 authorization, citizenship, U.S. person status or a clearance the user can't have, a graduate-only role for an
 undergraduate, a set start date before availableFrom, in the text or as work months in the title, a posting the
 site says no longer exists), "check" for wording a person should judge (a minimum length longer than availableFrom
-to availableUntil among them), else "ok", with the sentences behind it. Sponsorship alone never skips: below
+to availableUntil, or work in the school year for a user free only in the summer, among them), else "ok", with the
+sentences behind it. Sponsorship alone never skips: below
 senior year it doesn't stop an application (SKILL.md step 2). --move-skips (with --jobs) moves skipped lines
 below "# done" with the reason, so no batch picks them again. Batch 2026-11-08 spent $2.41 of $17.76 on four
 tailoring agents for postings that were then skipped.
@@ -66,6 +68,8 @@ import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import find_internships as fi  # noqa: E402  (the queue search: one reading of roles, companies and places for both)
 
 
 class Failed(Exception):
@@ -900,13 +904,21 @@ def early_start(low, st):
 # whose posting text says only "Work Period: May through August").
 MONTH_NAME = (r'(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|'
               r'oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)')
-TITLE_MONTHS = re.compile(rf'\b{MONTH_NAME}\.?\s*(?:-|–|—|to|through|thru)\s*{MONTH_NAME}\b')
+# A year may follow either month: "AI Security Research Intern - (September 2026 – May 2027)" (Carnegie Mellon,
+# 2026-11-20) went through as months alone, which read as September to May of the term's year.
+TITLE_MONTHS = re.compile(rf'\b{MONTH_NAME}\.?\s*(20\d\d)?\s*(?:-|–|—|to|through|thru)\s*{MONTH_NAME}\.?\s*(20\d\d)?\b')
 
 
 def title_early(title, st):
-    """early_start() on the work months a title names, else None."""
+    """early_start() on the work months a title names, else None. A range that wraps past December without a first
+    year ("September - May 2027") starts the year before its end."""
     m = TITLE_MONTHS.search(undotted(str(title or '')).lower())
-    return early_start(f'runs from {m.group(1)} to {m.group(2)}', st) if m else None
+    if not m:
+        return None
+    start, y1, end, y2 = m.groups()
+    if not y1 and MONTH_ABBR.index(start[:3]) > MONTH_ABBR.index(end[:3]):
+        y1 = str(int(y2 or st.get('year') or dt.date.today().year) - 1)
+    return early_start(f"runs from {start} {y1 or ''} to {end} {y2 or ''}", st)
 
 
 # A length the user's window (availableFrom to availableUntil) is too short for: "Available for a 4+ month co-op"
@@ -939,6 +951,40 @@ def too_long(text, st, title=False):
         if n * (30 if months else 7) > (last - first).days + 8:  # a week's slack: "4 months" isn't 4 x 30 days exactly
             return f"{n}{'+' if m.group(2) else ''} {'months' if months else 'weeks'}"
     return None
+
+
+# An internship worked part-time or through the school year, which a user free only for the summer can't do: "This
+# is a year-round, Full or Part -Time, flexible internship based on school schedule" (Navy Federal), "expected to
+# start as soon as possible in 2027 on part-time hours (10-20 hours a week)" (Live Nation). From 40 SimplifyJobs "N/A"
+# listings read on 2026-11-20, 5 were this kind (a sixth, "Flexible schedule, up to 20 hours per week", says nothing
+# about when). Part-time hours in the summer are no conflict ("15-20 hours a week for 10-12 weeks" in a summer
+# program), so only work in the school year or a job called part-time counts. Not counted, from 1,102 saved postings:
+# Workday's "(Part time)" after the location (many companies' summer internships carry it), "full or part-time
+# enrollment", a "year-round ... awards program", a summer internship that may go on part-time afterwards or where fall
+# work is "preferred". Only ever a check.
+YEAR_ROUND = re.compile(r'\byear[- ]round\b|\b(during|throughout) the (school|academic) year\b|\b(during|throughout) the (fall|spring) '
+                        r'(semester|term)s?\b|\b(based on|around) (your |their |the )?(school|class) schedules?\b|'
+                        r'\baround (your |their |the )?academic calendar\b')  # not "start dates (depending on your academic calendar)"
+PART_TIME = re.compile(r'\bpart[- ]?time\b')
+PART_TIME_JOB = re.compile(r'\bpart[- ]?time\b[^.]{0,25}\b(position|role|job|internship|intern|basis|hours|employment|assignment|temporary)\b'
+                           r'|\b(position|role|job|internship|employment type)\b[^.]{0,25}\bpart[- ]?time\b')
+NOT_JOB = re.compile(r'\b(enroll\w*|baccalaureate|degree|student status)\b')
+OPTIONAL = re.compile(r'\b(may|might|could|can|option\w*|opportunit\w*|possibilit\w*|possibly|potential\w*|extend\w*|continu\w*|prefer\w*|'
+                      r'after the summer|following the summer)\b')
+JOB_WORDS = re.compile(r'\b(intern\w*|co-?op|position|role|job|work\w*|schedule|hours)\b')
+
+
+def part_time(low):
+    """True when a sentence says the internship is worked through the school year or is a part-time job."""
+    if OPTIONAL.search(low) or NOT_JOB.search(low):
+        return False
+    return bool((YEAR_ROUND.search(low) and JOB_WORDS.search(low)) or PART_TIME_JOB.search(low))
+
+
+def summer_only(st):
+    """The user can work only a short window (availableFrom to availableUntil, a summer)."""
+    first, last = st.get('available_from'), st.get('available_until')
+    return bool(first and last and (last - first).days <= 150)
 
 
 REQUIRED_HEAD =re.compile(r'\b(required|requirements|minimum|basic|must have|what you need|you must|eligibility)\b', re.I)
@@ -987,6 +1033,9 @@ def screen(p, st):
     length = too_long(title, st, title=True)
     if length:
         hits.append(('check', f"lasts {length}, longer than {st['available_text']} to {st['available_until_text']}", p['role']))
+    summer = summer_only(st)
+    if summer and (YEAR_ROUND.search(title) or PART_TIME.search(title)):  # "Intern - Year Round", "Part-Time Student"
+        hits.append(('check', 'part-time or year-round', p['role']))
 
     prev = ''
     for s, preferred, required in sentences(html.unescape(p['description'] or '')):  # some job data is escaped twice ("&#xa;")
@@ -1054,6 +1103,8 @@ def screen(p, st):
         length = too_long(low, st)
         if length:
             hits.append(('check', f"lasts {length}, longer than {st['available_text']} to {st['available_until_text']}", s))
+        if summer and part_time(low):
+            hits.append(('check', 'part-time or year-round', s))
         # Under a "Preferred" heading only a degree line is plainly a preference; an export-control or citizenship
         # paragraph at the end of a posting often has no heading of its own, so it becomes a check, not a skip.
         if preferred and len(hits) > before and hits[-1][0] == 'skip':
@@ -1189,11 +1240,6 @@ def as_markdown(url, site, p):
     return '\n'.join(lines) + '\n'
 
 
-def role_key(title):
-    """A title without its term ("Software Engineer Intern - Summer 2027" is "software engineer intern")."""
-    return ' '.join(w for w in norm(title).split() if not re.fullmatch(r'20\d\d|summer|fall|autumn|winter|spring', w))
-
-
 def file_name(n, p):
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '', f"{n:02d} {p['company']} - {p['role']}")
     return re.sub(r'\s+', ' ', name).strip()[:90].rstrip(' .') + '.md'
@@ -1229,8 +1275,9 @@ def queue(path):
     return urls
 
 
-def fetch_item(n, url, out_dir, status, rows, blocked):
-    """Fetch one posting, write its file and screen it: (its entry in the output, the posting's data or None)."""
+def fetch_item(n, url, out_dir, status, rows, blocked, note_company=None):
+    """Fetch one posting, write its file and screen it: (its entry in the output, the posting's data or None).
+    `note_company` is the queue note's name for the company, which the tracker check also tries."""
     site, ids = parse(url)
     item = {'url': url, 'site': site or 'other'}
     p = None
@@ -1266,17 +1313,19 @@ def fetch_item(n, url, out_dir, status, rows, blocked):
                                                                or norm(r.get('company')) in norm(p['company']))]
             key = url_key(url)
             hits = [r for r in rows if url_key(r.get('posting_url')) == key] if key else []
-            if same or hits:
-                item['in_tracker'] = [{k: r.get(k) for k in ('id', 'role', 'status', 'date_added')} for r in {r['id']: r for r in same + hits}.values()]
+            # The same role under another link: Shield AI's "June 2027 Co-Op - Software Engineer Intern" moved from
+            # Lever to Ashby; DraftKings posted one Analyst Intern as JR15147 and JR15148, and its Workday names the
+            # company "Crown Holdings", so the note's company and the Workday site count too (fi.same_role). Only
+            # the fetched title counts here: the lists shorten titles, which could match another role.
+            twin = fi.find_same_role(fi.role_posting([p['company'], note_company], [p['role']], p['location'], url),
+                                     fi.applied_roles(rows))
+            found = same + hits + ([twin['row']] if twin else [])
+            if found:
+                item['in_tracker'] = [{k: r.get(k) for k in ('id', 'role', 'status', 'date_added')} for r in {r['id']: r for r in found}.values()]
                 item['same_posting_in_tracker'] = bool(hits)
-                # The same title at the company under another link and another note title: Shield AI's "June 2027
-                # Co-Op - Software Engineer Intern" moved from Lever to Ashby, and a list called it "Software Engineer Intern Co-op".
-                # Skipped rows don't count: a closed posting's repost is worth screening again. The company has to be
-                # the same by whole words (same_company): `same` above lets "HP" match "HPE".
-                role = role_key(p['role'])
-                if role and any(same_company(r.get('company'), p['company']) and role_key(r.get('role')) == role
-                                and str(r.get('status') or '').strip().lower() != 'skipped' for r in same):
+                if twin:
                     item['same_role_in_tracker'] = True
+                    item['same_role_as'] = twin['row'].get('id')
     except Failed as e:
         p = None
         item.update({'ok': False, 'error': str(e)})
@@ -1348,8 +1397,7 @@ def picked_on(parts, day):
 
 def same_company(a, b):
     """One company under two spellings: "Northwind" and "Northwind Labs" (a note's name and the posting's)."""
-    a, b = norm(a), norm(b)
-    return bool(a and b) and (a == b or a.startswith(b + ' ') or b.startswith(a + ' '))
+    return fi.same_company(a, b)
 
 
 def applied_count(rows, company, days=None):
@@ -1389,13 +1437,17 @@ def pick_batch(a, status, rows, tracker_note):
     and 10 went ahead with 4, 2 and 4. A later call that day passes over the lines the earlier ones marked, counts
     them toward the caps, and numbers its files and `order` after the earlier calls' (kept in out_dir).
     """
-    sys.path.insert(0, HERE)
-    import find_internships as fi
     prof = json.load(open(a.profile, encoding='utf-8-sig'))
     wanted, skips, term = fi.wanted_roles(prof), fi.skip_names(prof), fi.profile_term(prof)
     today = dt.date.today()
     rows = rows or []
     recent = fi.recent_counts({i: r for i, r in enumerate(rows)})
+    applied = fi.applied_roles(rows)
+    today_roles = {}  # fi.role_index of the lines picked today, this call's included
+
+    def add_role(posting):
+        for k in posting['keys']:
+            today_roles.setdefault(k, []).append(posting)
     lines = open(a.jobs, encoding='utf-8-sig').read().splitlines()
     done_at = next((i for i, l in enumerate(lines) if l.strip().lower() == '# done'), len(lines))
     top = lines[:done_at]
@@ -1431,6 +1483,8 @@ def pick_batch(a, status, rows, tracker_note):
         mark = picked_on([x.strip() for x in m.group(2).split('|')], day) if m else None
         if mark:
             taken.append(m.group(2).split('|')[0].strip() or m.group(1))
+            q = fi.note_parts(line)
+            add_role(fi.role_posting(q[1], [q[2]], q[3], q[0]))
             site, ids = parse(m.group(1))
             if mark.group(2):
                 hosts.add(mark.group(2))
@@ -1470,6 +1524,16 @@ def pick_batch(a, status, rows, tracker_note):
         if title and title_early(title, status) == 'skip':
             moved[i] = f"starts before {status['available_text']}"
             continue
+        # Another requisition of a role applied to, or of one picked today (DraftKings' JR15148 after JR15147). The
+        # second kind stays in the queue: if the picked one turns out closed, this one is the way in.
+        place = (fi.note_parts(line) or ('', '', '', ''))[3]
+        here = fi.role_posting(company, [title], place, url) if title else None
+        if here and fi.find_same_role(here, applied):
+            moved[i] = 'same role already in the tracker'
+            continue
+        if here and fi.find_same_role(here, today_roles):
+            passed['same role picked today'] = passed.get('same role picked today', 0) + 1
+            continue
         lim =next((re.match(r'held: limit (\d+)(?: per (\d+) days)?', h) for h in holds if h.startswith('held: limit')), None)
         if lim and company and applied_count(rows, company, int(lim.group(2)) if lim.group(2) else None) >= int(lim.group(1)):
             held.append(f'{who} (its posting allows {lim.group(1)} applications)')  # recounted from the tracker, not fetched again
@@ -1486,17 +1550,25 @@ def pick_batch(a, status, rows, tracker_note):
             stopped = 'fetch limit'
             break
         attempts += 1
-        item, p = fetch_item(start + attempts, url, a.out_dir, status, rows, blocked)
+        item, p = fetch_item(start + attempts, url, a.out_dir, status, rows, blocked, company)
         if not item.get('ok') and company:  # unread postings: the queue's note says what they are
             item.update({'company': company, 'role': title, 'from_note': True})
         if item.get('screen') == 'skip':
             moved[i] = item['screen_why'][0].split(':')[0]
             continue
-        if item.get('same_posting_in_tracker') or item.get('same_role_in_tracker'):
+        if item.get('same_posting_in_tracker'):
             moved[i] = 'already in the tracker'
+            continue
+        if item.get('same_role_in_tracker'):
+            moved[i] = 'same role already in the tracker'
             continue
         name = company or (p or {}).get('company') or ''
         if p:
+            # Among today's picks the note's title counts too: passing over a twin only lasts until tomorrow.
+            here = fi.role_posting([company, p['company']], [p['role'], title], p['location'] or place, url)
+            if fi.find_same_role(here, today_roles):
+                passed['same role picked today'] = passed.get('same role picked today', 0) + 1
+                continue
             if fi.role_fits(p['role'], wanted) is False:
                 moved[i] = not_role
                 continue
@@ -1527,6 +1599,7 @@ def pick_batch(a, status, rows, tracker_note):
             continue
         changed[i] = with_tag(line, f'picked {day}' + (f' iCIMS {icims_host}' if icims_host and icims_host != host else ''))
         taken.append(name or url)
+        add_role(here or fi.role_posting([company, name], [item.get('role')], place, url))
         if icims_host:
             hosts.add(icims_host)
         item['order'] = start + attempts  # queue order across picks and to_judge: a check that passes takes its place in line

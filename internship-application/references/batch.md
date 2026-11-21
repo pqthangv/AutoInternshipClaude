@@ -42,9 +42,10 @@ Fill in the `<...>` parts and send only this.
 ```
 You're tailoring one internship application in a batch run by the internship-application skill.
 With your file-reading tool, not cat, read <skill>/SKILL.md, the posting and the profile first, and do SKILL.md
-steps 1 and 2 for this posting only (the tracker check is already done): create the job folder, save job-posting.md,
-check eligibility. If it's a skip, reply now. Otherwise read <skill>/references/tailoring.md (and references/overleaf.md
-if the master is .tex) and the master, then do step 3: tailor, check and save the resume, write changes.md, write the
+steps 1 and 2 for this posting only (the tracker check is already done): create the job folder (a new one when another
+posting's folder has the name: never write into it), save job-posting.md, check eligibility. If it's a skip, reply
+now. Otherwise read <skill>/references/tailoring.md (and references/overleaf.md if the master is .tex) and the master,
+then do step 3: tailor, check and save the resume, write changes.md, write the
 cover letter when tailoring.md's "Cover letter" says (optional fields included), and draft any written answers into
 <scratch>/answers/<NN>.md. Read each file once.
 Don't open the application form, don't change the tracker, don't start subagents of your own, and don't call the advisor tool.
