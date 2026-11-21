@@ -74,7 +74,7 @@ Capture: company, role, term, dates or length, location and on-site policy, pay,
 
 Check the tracker: `in_tracker` lists rows for the same company, `same_posting_in_tracker` is true when the link matches, and `same_role_in_tracker` is true when `same_role_as` (a row ID) is the same role under another link. Without a fetch, run `python scripts/tracker.py find "<folder>/tracker.xlsx" --company "<Company>"`. If the same role is there, tell the user when they applied and ask whether to continue (in Submit mode with auto, skip it and say so in the report).
 
-Create `Applications/YYYY-MM-DD Company - Role/` (strip \ / : * ? " < > |) and save the posting as `job-posting.md`, with the URL and deadline at the top. A fetched file is already in this format: copy it in.
+Create `Applications/YYYY-MM-DD Company - Role/` (strip \ / : * ? " < > |) and save the posting as `job-posting.md`, with the URL and deadline at the top. A fetched file is already in this format: copy it in. If that folder exists and its job-posting.md has another URL, it belongs to another posting: never write into it; add the posting's job ID from its link to the new folder's name (`2027-06-01 Northwind - Data Intern (R12345)`), or ` 2` without one.
 
 ### 2. Check eligibility, then fit
 
