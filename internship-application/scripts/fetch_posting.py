@@ -1025,8 +1025,8 @@ def screen(p, st):
     undergrad = st['degree'] in ("Bachelor's", "Associate's")
 
     title = undotted(p['role'] or '').lower()
-    if undergrad and GRAD_ONLY.search(title) and not UNDERGRAD.search(title):
-        hits.append(('skip', 'graduate-only role', p['role']))
+    if undergrad and (GRAD_ONLY.search(title) or fi.graduate_title(title)) and not UNDERGRAD.search(title):
+        hits.append(('skip', 'graduate-only role', p['role']))  # "Evaluation Analytics Graduate Intern" (Highmark)
     early = title_early(p['role'], st)
     if early:
         hits.append((early, f"starts before {st['available_text']}", p['role']))
@@ -1273,6 +1273,32 @@ def queue(path):
         if m:
             urls.append(m.group(1))
     return urls
+
+
+def link_screen(url, st, term, title=''):
+    """For a posting the fetch couldn't read: what the words in its link say, as (verdict, why) or None. The lists
+    shorten titles ("Software Engineering Intern" for Bombardier's ".../Wichita-Software-Engineering-Intern-
+    (Year-round)-KS-67209/..."). As in other_term(), a link's season counts only when the list's title names no
+    term (reposted requisitions keep old words: Plexus's "Summer 2027" posting's link says "Fall 2026")."""
+    words = fi.link_words(url)
+    if not words:
+        return None
+    low = words.lower()
+    said = f'the link says "{words[:90]}"'
+    named = set(re.findall(r'\b(summer|fall|autumn|winter|spring)\b', low))
+    season = term.split()[0].lower() if term else ''
+    titled = re.search(r'\b(summer|fall|autumn|winter|spring|20\d{2})\b', str(title or '').lower())
+    if season and named and not titled and season not in named and not (season == 'fall' and 'autumn' in named):
+        return 'skip', f'the link names another term: {said}'
+    if st['degree'] in ("Bachelor's", "Associate's") and fi.title_rules_out(low, st['degree']):
+        return 'skip', f'graduate-only role: {said}'
+    if fi.not_internship(low, term):
+        return 'skip', f'not an internship: {said}'
+    if title_early(words, st) == 'skip':
+        return 'skip', f"starts before {st['available_text']}: {said}"
+    if summer_only(st) and (YEAR_ROUND.search(low) or PART_TIME.search(low)):
+        return 'check', f'part-time or year-round: {said}'
+    return None
 
 
 def fetch_item(n, url, out_dir, status, rows, blocked, note_company=None):
@@ -1524,6 +1550,9 @@ def pick_batch(a, status, rows, tracker_note):
         if title and title_early(title, status) == 'skip':
             moved[i] = f"starts before {status['available_text']}"
             continue
+        if title and fi.title_rules_out(title, status['degree']):
+            moved[i] = 'graduate-only role'
+            continue
         # Another requisition of a role applied to, or of one picked today (DraftKings' JR15148 after JR15147). The
         # second kind stays in the queue: if the picked one turns out closed, this one is the way in.
         place = (fi.note_parts(line) or ('', '', '', ''))[3]
@@ -1553,6 +1582,10 @@ def pick_batch(a, status, rows, tracker_note):
         item, p = fetch_item(start + attempts, url, a.out_dir, status, rows, blocked, company)
         if not item.get('ok') and company:  # unread postings: the queue's note says what they are
             item.update({'company': company, 'role': title, 'from_note': True})
+        if not item.get('ok') and not item.get('closed'):  # and so may the link's own words
+            said = link_screen(url, status, term, title)
+            if said:
+                item['screen'], item['screen_why'] = said[0], [said[1]]
         if item.get('screen') == 'skip':
             moved[i] = item['screen_why'][0].split(':')[0]
             continue

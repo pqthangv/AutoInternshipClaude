@@ -186,13 +186,46 @@ def not_internship(title, term):
 
 
 GRAD_TITLE = re.compile(r'\b(ph\.?\s?d|doctoral|doctorate|master\'?s|mba)\b')
-UNDERGRAD_TITLE = re.compile(r'\b(bachelor\w*|undergrad\w*|bs|ba)\b')
+UNDERGRAD_TITLE = re.compile(r'\b(bachelor\w*|undergrad\w*|under-graduate\w*|bs|ba)\b')
+# "Graduate Intern", "Graduate Co-op", "Graduate Research Assistant", "Internship - Data Science - Graduate": roles for
+# graduate students (all 159 such titles on the four lists on 2026-11-21; a few more are full-time graduate jobs,
+# "Graduate Engineer", also not for an undergraduate). Not "new/recent/college graduate" (not_internship's), a
+# graduation year or date ("Grad Year: Spring 2028", "graduating 2027"), or "must graduate by ...".
+NOT_GRAD_ROLE = re.compile(r'\b(new|recent|college|university)\s+graduates?\b|\bgraduate\s+(year|date|by|in|between|before|after|from)\b'
+                           r'|\b(will|to|must|expected to)\s+graduate\b')
+
+
+def graduate_title(title):
+    t = NOT_GRAD_ROLE.sub(' ', str(title or '').lower())
+    return bool(re.search(r'\bgraduate\b', t))
 
 
 def title_rules_out(title, degree):
-    """For a listing with no degree field: True when the title asks for a graduate degree an undergraduate lacks."""
+    """True when the title asks for a graduate degree or a graduate student, which an undergraduate isn't
+    ("Master's", "PhD", "Graduate Intern")."""
     t = str(title or '').lower()
-    return degree in ("Bachelor's", "Associate's") and bool(GRAD_TITLE.search(t)) and not UNDERGRAD_TITLE.search(t)
+    return degree in ("Bachelor's", "Associate's") and bool(GRAD_TITLE.search(t) or graduate_title(t)) and not UNDERGRAD_TITLE.search(t)
+
+
+MONTH_WORD = r'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?'
+
+
+def link_words(url):
+    """The words a link spells out, for postings the fetch can't read ("jobs.bombardier.com/job/Wichita-Software-
+    Engineering-Intern-%28Year-round%29-KS-67209/1459029933" says Year-round; the list's title didn't). The longest
+    part of the path with three or more words; Workday links as link_title(). '' when there are none."""
+    if link_title(url):
+        return link_title(url)
+    u = urllib.parse.urlparse(str(url or ''))
+    best = ''
+    for seg in u.path.split('/'):
+        words = re.sub(r'[-_+]+|%20', ' ', urllib.parse.unquote(seg)).strip()
+        # Words of letters only, so IDs ("9cc07826-a8bc-4ad4-...") don't count.
+        if len(re.findall(r'(?<![A-Za-z0-9])[A-Za-z]{2,}(?![A-Za-z0-9])', words)) >= 3 and len(words) > len(best):
+            best = words
+    # "May-August" lost its dash with the others; put it back between two month names for title_early().
+    best = re.sub(rf'\b({MONTH_WORD})\s+(?=({MONTH_WORD})\b)', r'\1 - ', re.sub(r'\s+', ' ', best), flags=re.I)
+    return best
 
 
 # ---- the user's own limits on the queue: profile.json's roleTypes ("software, data") and skipCompanies ----
@@ -776,6 +809,7 @@ def tidy(folder):
     profile = load_profile(folder)
     us_only = home_is_us(profile)  # the user's call (2026-11-08): batches skip jobs outside the U.S.
     wanted, term = wanted_roles(profile), profile_term(profile)
+    degree = degree_level(((profile.get('education') or [{}])[0] or {}).get('degree', ''))
     applied = applied_roles({id(r): r for r in tracked.values()}.values())
     for line in lines[:done_at]:
         m = re.search(r'https?://\S+', line)
@@ -809,6 +843,8 @@ def tidy(folder):
             moved.append((line.rstrip() + ' | skipped: the title names another term', note, 'another term'))
         elif len(parts) > 1 and not_internship(parts[1], term):
             moved.append((line.rstrip() + ' | skipped: not an internship', note, 'not an internship'))
+        elif len(parts) > 1 and title_rules_out(parts[1], degree):
+            moved.append((line.rstrip() + ' | skipped: graduate-only role', note, 'graduate-only role'))
         else:
             keep.append(line)
         seen |= links
@@ -831,6 +867,7 @@ def tidy(folder):
             'not_a_wanted_role': sum(1 for *_, why in moved if why == 'not a wanted role'),
             'another_term': sum(1 for *_, why in moved if why == 'another term'),
             'not_an_internship': sum(1 for *_, why in moved if why == 'not an internship'),
+            'graduate_only': sum(1 for *_, why in moved if why == 'graduate-only role'),
             'left_in_queue': sum(1 for l in keep if re.search(r'https?://', l)),
             'moved': shown + ([f'... {len(moved) - 10} more'] if len(moved) > 10 else [])}
 
@@ -1128,7 +1165,9 @@ def main():
         if (kw and not any(k in title for k in kw)) or any(k in title for k in ex):
             skipped['keyword'] += 1; continue
         degrees = x.get('degrees') or []
-        if (degree and degrees and degree not in degrees) or (not degrees and title_rules_out(x.get('title'), degree)):
+        # The title counts even when the list names degrees: SimplifyJobs listed Highmark's "Evaluation Analytics
+        # Graduate Intern" for undergraduates too.
+        if (degree and degrees and degree not in degrees) or title_rules_out(x.get('title'), degree):
             skipped['degree'] += 1; continue
         sp = x.get('sponsorship', '')
         if (drop_no_sponsor and sp == 'Does Not Offer Sponsorship') or \
