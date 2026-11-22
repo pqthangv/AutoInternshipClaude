@@ -17,7 +17,7 @@ Leave the form with only the Submit button to click. On iCIMS, that's the final 
 
 ### Signatures
 
-For "Electronic signature: type your full legal name" and its date, type `firstName` and `lastName` from the profile (not `preferredName`) and today's date in the form's format. Record it under "Agreed for you". A name the profile doesn't have (such as the name in a native language) is a question.
+For "Electronic signature: type your full legal name" and its date, type `firstName` and `lastName` from the profile (not `preferredName`) and today's date in the form's format. Tick a signature checkbox (a box labeled "Signature", or "checking this box is my electronic signature") like an agreement. Record each under "Agreed for you". A name the profile doesn't have (such as the name in a native language) is a question.
 
 ### Questions the profile doesn't answer
 
@@ -57,7 +57,7 @@ If any check fails, don't submit. Stop as in Fill all, and put the failed check 
 ### Submitting
 
 1. Click Submit once.
-2. Wait for the confirmation (a thank-you page or a message that the application was received). If a CAPTCHA appears, hand it over: the user solves it, clicks Submit and tells you.
+2. Wait for the confirmation (a thank-you page or a message that the application was received). On an iCIMS form opened on its own page, wait until the page changes (a short wait, then `find`), then open its step page (application-record.md's `Step page:` line; in a batch, the filling reply's) in the same tab and look for the confirmation there. If a CAPTCHA appears, hand it over: the user solves it, clicks Submit and tells you.
 3. If no confirmation appears or the page shows an error, never click again (it can send the application twice). Log `Needs you` with next step "check whether it went through", and say so in the report.
 4. Once confirmed, set the record's status line to `Submitted by Claude, <YYYY-MM-DD HH:MM>. Confirmation: <the page's message or number>` and run `python scripts/tracker.py update "<folder>/tracker.xlsx" --id <id> --set status=Submitted`. Never `--set notes` here: it replaces the notes already there.
 5. Then move to the next application.
