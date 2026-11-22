@@ -7,7 +7,7 @@ Usage:
   python fetch_posting.py --jobs jobs.txt --pick N --out-dir DIR --profile profile.json [--tracker tracker.xlsx]
 
 --pick goes down the queue until N postings are ready for one batch: it passes over lines the user held or whose
-company is in profile.json's skipCompanies or that repeat a role picked today under another link, moves screen
+company is in profile.json's skipCompanies, whose site is in its skipSites, or that repeat a role picked today under another link, moves screen
 skips, titles of other kinds of role (roleTypes) or another term, and other links to a role already in the tracker
 below "# done", and holds a third posting from one company, a second from one iCIMS site, and one
 past an application limit its company states. The same call again on the same day refills a batch whose postings
@@ -1465,6 +1465,7 @@ def pick_batch(a, status, rows, tracker_note):
     """
     prof = json.load(open(a.profile, encoding='utf-8-sig'))
     wanted, skips, term = fi.wanted_roles(prof), fi.skip_names(prof), fi.profile_term(prof)
+    sites = fi.skip_sites(prof)
     today = dt.date.today()
     rows = rows or []
     recent = fi.recent_counts({i: r for i, r in enumerate(rows)})
@@ -1537,6 +1538,9 @@ def pick_batch(a, status, rows, tracker_note):
             continue
         if company and fi.skip_listed(company, skips):
             passed['on your skip list'] = passed.get('on your skip list', 0) + 1
+            continue
+        if fi.site_listed(url, sites):  # left in place, like skipped companies: the user may lift it
+            passed['site on your skip list'] = passed.get('site on your skip list', 0) + 1
             continue
         if title and fi.role_fits(title, wanted) is False:
             moved[i] = not_role

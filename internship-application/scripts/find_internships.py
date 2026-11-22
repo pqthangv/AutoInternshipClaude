@@ -341,6 +341,25 @@ def skip_listed(company, names):
     return bool(b) and any(b == s or b.startswith(s + ' ') for s in names)
 
 
+def skip_sites(profile):
+    """profile.json's skipSites as bare host names: "https://www.UltiPro.com/" is "ultipro.com", "UKG" is "ukg"."""
+    out = set()
+    for x in profile_list(profile.get('skipSites')):
+        host = re.sub(r'^[a-z]+://', '', x.lower()).split('/')[0]
+        out.add(re.sub(r'^www\.', '', host))
+    return out - {''}
+
+
+def site_listed(url, sites):
+    """True when the link is on a site profile.json's skipSites names: application sites the user can't sign in
+    to (UKG's UltiPro, 2026-11-21). "ultipro.com" covers recruiting2.ultipro.com; a name without a dot ("ukg")
+    matches any part of the host (northwind.rec.pro.ukg.net)."""
+    host = urllib.parse.urlparse(str(url or '')).netloc.lower().split(':')[0]
+    if not host or not sites:
+        return False
+    return any((host == s or host.endswith('.' + s)) if '.' in s else s in host.split('.') for s in sites)
+
+
 def profile_term(profile):
     m = re.search(r'(summer|fall|winter|spring)\s+(20\d{2})', str(profile.get('internshipTerm', '')), re.I)
     return f'{m.group(1).title()} {m.group(2)}' if m else None
@@ -1065,7 +1084,7 @@ def main():
         cats |= CATEGORIES[key]
 
     simplify, speedy, vansh, failed = fetch()
-    wanted, skips = wanted_roles(profile), skip_names(profile)
+    wanted, skips, sites = wanted_roles(profile), skip_names(profile), skip_sites(profile)
     # A job on both lists is taken from SimplifyJobs. A closed SimplifyJobs entry matches only by link or job ID:
     # by company and title, an old closed posting would hide this year's open one.
     all_links, open_links, open_names = set(), set(), set()
@@ -1133,13 +1152,15 @@ def main():
     kw = [norm(k) for k in a.keyword]
     ex = [norm(k) for k in a.exclude_keyword]
 
-    skipped = {'linkedin_link': 0, 'closed': 0, 'term': 0, 'not_internship': 0, 'category': 0, 'role': 0, 'skip_list': 0, 'location': 0, 'outside_us': 0,
+    skipped = {'linkedin_link': 0, 'closed': 0, 'term': 0, 'not_internship': 0, 'category': 0, 'role': 0, 'skip_list': 0, 'skip_site': 0, 'location': 0, 'outside_us': 0,
                'keyword': 0, 'degree': 0, 'sponsorship': 0, 'too_old': 0, 'already_tracked': 0, 'already_in_jobs_txt': 0,
                'same_role_applied': 0, 'same_role_queued': 0}
     if wanted:
         defaults_used['roles'] = role_words(wanted)
     if skips:
         defaults_used['skip_companies'] = sorted(skips)
+    if sites:
+        defaults_used['skip_sites'] = sorted(sites)
     us_only = home_is_us(profile) and not a.include_abroad
     results = []
     for x in simplify + extra + vansh_extra:
@@ -1157,6 +1178,8 @@ def main():
             skipped['role'] += 1; continue
         if skip_listed(x.get('company_name'), skips):
             skipped['skip_list'] += 1; continue
+        if site_listed(x.get('url'), sites):
+            skipped['skip_site'] += 1; continue
         if not location_match(x.get('locations') or [], a.location):
             skipped['location'] += 1; continue
         if us_only and outside_us(x.get('locations') or []):
@@ -1222,6 +1245,8 @@ def main():
         if real and ('linkedin.com' in real.lower() or posting_keys(real, x['company_name']) & known
                      or find_same_role(here, applied) or find_same_role(here, waiting)):
             vansh_count['known_after_lookup'] += 1
+        elif real and site_listed(real, sites):  # its short link hid the site until now
+            skipped['skip_site'] += 1
         elif real:
             results.append(dict(x, url=real))
     if go_links:

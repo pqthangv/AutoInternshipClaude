@@ -51,5 +51,6 @@
   "writingStyle": "",
   "extraRules": "",
   "roleTypes": "",
-  "skipCompanies": ""
+  "skipCompanies": "",
+  "skipSites": ""
 }
