@@ -25,6 +25,8 @@ Click **Fill with AutoInternship** on the right edge of the application page. A 
 
 On forms with several steps (Workday's **Save and Continue**), fill again on each step. Running it twice is safe.
 
+iCIMS shows its last step's forms (veteran, disability) in a frame. AutoInternship adds an **Open this form on its own page** link above it; open it there and fill as usual.
+
 On Workday's work experience step, it also tidies each job's description that Workday copied from your resume: it joins lines broken in the middle of a sentence, puts back the first "•", and removes another section's heading or the next job's first line copied in at the end. The panel lists what it changed. A description it can't sort out is left as it is and listed as left. It also turns your phone number into the plain digits Workday's phone box takes when Workday copied it with a "+1" and brackets, and lists a job's company box that ends with that job's location.
 
 ## Use with Claude
@@ -33,7 +35,7 @@ The `internship-application` skill in this repo reads your answers from `profile
 
 ## What it fills
 
-Name, contact details, address, links, education, student questions (graduation, class standing, term, dates), work history, work authorization, sponsorship, relocation, government ties, salary, start date, your saved answers and your resume. That includes text boxes, dropdowns (including Greenhouse, Workday and Oracle's custom ones), radio buttons and "select all that apply" checkboxes, and questions written as plain text on the line above their box (as on iCIMS's self-identification forms).
+Name, contact details, address, links, education, student questions (graduation, class standing, term, dates), work history, work authorization, sponsorship, relocation, government ties, salary, start date, your saved answers and your resume. That includes text boxes, dropdowns (including Greenhouse, Workday and Oracle's custom ones), radio buttons and "select all that apply" checkboxes, and questions and choices written as plain text beside their box (as on iCIMS's self-identification forms).
 
 - **Sponsorship** has two answers: "now or in the future" and "for the internship itself". A question only about this internship (or "now" without the future) gets the internship answer, even over a saved answer. If a question could mean either, it's filled only when both answers match.
 - **Voluntary self-identification** (gender, pronouns, Hispanic or Latino, race, veteran, disability, LGBTQ+, transgender, sexual orientation) is filled only with the choice you pick for each, including "Decline to answer". "Not set" leaves it for you.

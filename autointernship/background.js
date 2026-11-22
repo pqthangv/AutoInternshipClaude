@@ -30,6 +30,19 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   return true; // the reply comes later
 });
 
+// An iCIMS form shown in a frame (bridge.js, "Open this form on its own page") asks for a link to it on the
+// page at the top of the tab. The address is the one Chrome reports for that frame, never one the page
+// supplies, and only an iCIMS form page's. The reply says whether the page at the top showed the link.
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  if (!msg || msg.type !== 'autointernship:framed-form' || !sender.tab || !sender.frameId) return false;
+  let url;
+  try { url = new URL(sender.url); } catch (_) { return false; }
+  if (url.protocol !== 'https:' || !/\.icims\.com$/.test(url.hostname) || !url.pathname.startsWith('/forms')) return false;
+  chrome.tabs.sendMessage(sender.tab.id, { type: 'autointernship:open-frame', url: url.href }, { frameId: 0 })
+    .then((r) => reply({ ok: !!(r && r.ok) }), () => reply({ ok: false }));
+  return true; // the reply comes later
+});
+
 function badge(tabId, text, color) {
   chrome.action.setBadgeBackgroundColor({ tabId, color });
   chrome.action.setBadgeText({ tabId, text });

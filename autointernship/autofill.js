@@ -298,11 +298,14 @@
 
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  function cleanText(node, skip) {
+  // until: stop at this node (groupQuestion uses it to read only the text before a group's last choice).
+  function cleanText(node, skip, until) {
     if (!node) return '';
     let out = '';
+    let stopped = false;
     const walk = (n) => {
-      if (out.length > 400 || (skip && skip.has(n))) return;
+      if (stopped || out.length > 400 || (skip && skip.has(n))) return;
+      if (n === until) { stopped = true; return; }
       if (n.nodeType === 3) { out += n.nodeValue + ' '; return; }
       if (n.nodeType !== 1) return;
       const tag = n.tagName;
@@ -1385,6 +1388,41 @@
     return radios[0].parentElement;
   }
 
+  // Loose text written just after a radio button or checkbox that has no label of any other kind. iCIMS's
+  // self-ID forms wrap each choice alone in a <span> and write its words after the wrapper:
+  // "<span><input type=radio value="NotProtectedVeteran"></span> I AM NOT A PROTECTED VETERAN<br>". The box has
+  // no next sibling, so the report showed the codes and the veteran question was left. Walks forward from the
+  // box, out of inline wrappers (and out of a wrapper holding only the box, whatever its display), and takes
+  // the text up to a line break, a block edge or another box. Returns the nodes it took,
+  // so groupQuestion() can leave them out of the question. Longer text is a notice, not a choice.
+  function afterNodes(el) {
+    const inline = (n) => /^inline/.test(getComputedStyle(n).display);
+    const nodes = [];
+    let len = 0;
+    let node = el;
+    for (let steps = 0; steps < 40; steps++) {
+      const next = node.nextSibling;
+      if (!next) {
+        const up = node.parentElement;
+        if (!up || !(inline(up) || (controlCount(up) === 1 && !cleanText(up)))) break; // a block holding more than the box
+        node = up;
+        continue;
+      }
+      node = next;
+      if (node.nodeType === 3) { nodes.push(node); len += node.nodeValue.trim().length; }
+      else if (node.nodeType === 1) {
+        if (node.tagName === 'BR') break; // even with no text yet: the next line is someone else's
+        if (/^(SELECT|TEXTAREA|INPUT|BUTTON|LABEL)$/.test(node.tagName) || controlCount(node)) break;
+        if (/^(SCRIPT|STYLE)$/.test(node.tagName) || getComputedStyle(node).display === 'none') continue;
+        if (!inline(node)) break;
+        nodes.push(node);
+        len += cleanText(node).length;
+      }
+      if (len > 200) return [];
+    }
+    return len ? nodes : [];
+  }
+
   function optionLabel(r) {
     if (r.labels && r.labels.length) { const t = cleanText(r.labels[0]); if (t) return t; }
     const a = r.getAttribute('aria-label');
@@ -1396,7 +1434,8 @@
     }
     const el = r.nextElementSibling;
     if (el) { const t = cleanText(el); if (t && t.length < 60) return t; }
-    return r.value || '';
+    const after = afterNodes(r).map((n) => (n.nodeType === 3 ? n.nodeValue : cleanText(n))).join(' ').replace(/\s+/g, ' ').trim();
+    return after || r.value || '';
   }
 
   // The question a group of radio buttons or checkboxes answers, as written on the form
@@ -1420,15 +1459,36 @@
       else {
         if (r.nextSibling) skip.add(r.nextSibling);
         if (r.nextElementSibling) skip.add(r.nextElementSibling);
+        for (const n of afterNodes(r)) skip.add(n); // the words after an iCIMS wrapper (see afterNodes)
       }
     }
+    // The question comes before the choices. Text after the last one is a notice: iCIMS's disability form
+    // ends its choices with a "PUBLIC BURDEN STATEMENT" and asks "Please check one of the boxes below:" in the
+    // table row above. So: text before the last choice, then the line just above the group, then (as before)
+    // any text around it.
+    const last = radios[radios.length - 1];
+    const around = (until) => {
+      let node = box;
+      for (let i = 0; node && i < 3; i++, node = node.parentElement) {
+        if (i > 0 && controlCount(node) > radios.length) break;
+        const t = cleanText(node, skip, until);
+        if (norm(t).length >= 3) return t.slice(0, 300);
+      }
+      return '';
+    };
+    const before = around(last);
+    if (before) return before;
     let node = box;
     for (let i = 0; node && i < 3; i++, node = node.parentElement) {
       if (i > 0 && controlCount(node) > radios.length) break;
-      const t = cleanText(node, skip);
-      if (norm(t).length >= 3) return t.slice(0, 300);
+      const prev = node.previousElementSibling;
+      if (prev) {
+        const t = controlCount(prev) ? '' : cleanText(prev);
+        if (norm(t).length >= 3 && t.length < 250) return t;
+        break;
+      }
     }
-    return '';
+    return around(null);
   }
 
   // Ticks a radio button or checkbox so the page's own scripts notice.

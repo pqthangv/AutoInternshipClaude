@@ -198,15 +198,73 @@
 
   // While the switch is on, checks every 1.5 seconds: shows the button once the frame has a form (forms
   // often load after the page), and as a backup to the keeper above, puts it back if a redraw dropped it.
-  // Turning the switch off removes it.
+  // The same checks keep the "Open this form on its own page" link in place (see below).
+  // Turning the switch off removes them.
   function update(on) {
     clearInterval(timer);
-    if (!on) { keeper.disconnect(); removeCopy(); if (root) root.remove(); root = null; return; }
+    if (!on) {
+      timer = null;
+      keeper.disconnect(); removeCopy(); if (root) root.remove(); root = null;
+      if (openLink) openLink.remove(); openLink = null; told = 0;
+      return;
+    }
     const check = () => {
       if (!root) { if (hasForm()) build(); } else if (!root.isConnected) attach();
+      if (FRAMED_FORM()) tellTop();
+      placeOpenLink();
     };
     check();
     timer = setInterval(check, 1500);
+  }
+
+  /* "Open this form on its own page"
+     iCIMS shows its last step's forms (veteran, disability and similar self-ID forms) in a frame from another
+     iCIMS address, and Claude's page tools can't see inside a frame: not the fields, not this report, not
+     the signature box or Submit. The address of that frame isn't readable from the page either. So the
+     frame tells the page above it, through background.js, and the page shows a link to the form's own
+     address just above the frame. Opened that way the form is an ordinary page, Fill button included. */
+  const FRAMED_FORM = () => window !== window.top && /\.icims\.com$/.test(location.hostname) && location.pathname.startsWith('/forms');
+  let told = 0;       // tries at telling the page above (in a framed form)
+  let openLink = null; // the link (on the page above)
+
+  // In the framed form: tell the page above until it has the link (its script may load after ours).
+  async function tellTop() {
+    if (told < 0 || told > 20 || !hasForm()) return;
+    told++;
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'autointernship:framed-form' });
+      if (r && r.ok) told = -1;
+    } catch (_) { /* the extension was reloaded; nothing to do */ }
+  }
+
+  function showOpenLink(url) {
+    if (!openLink) {
+      openLink = document.createElement('a');
+      openLink.id = 'autointernship-open-frame';
+      openLink.textContent = 'Open this form on its own page (AutoInternship)';
+      css(openLink, `display: inline-block; margin: 8px 0; padding: 6px 10px; border: 2px solid ${GREEN}; border-radius: 6px; color: ${GREEN}; font-weight: 600; text-decoration: underline; cursor: pointer;`);
+    }
+    openLink.href = url;
+    placeOpenLink();
+  }
+
+  function placeOpenLink() {
+    if (!openLink || openLink.isConnected) return;
+    const host = new URL(openLink.href).host;
+    const frame = document.querySelector('iframe#icims_formFrame')
+      || [...document.querySelectorAll('iframe')].find((f) => { try { return new URL(f.src).host === host; } catch (_) { return false; } });
+    if (frame && frame.parentNode) frame.parentNode.insertBefore(openLink, frame);
+    else if (document.body) document.body.prepend(openLink);
+  }
+
+  // Only the page at the top shows the link; background.js sends it the framed form's own address.
+  if (window === window.top) {
+    chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+      if (!msg || msg.type !== 'autointernship:open-frame' || !timer) return false; // !timer: the switch is off
+      showOpenLink(msg.url);
+      reply({ ok: true });
+      return false;
+    });
   }
 
   const isOn = (settings) => !settings || settings.fillButton !== false;
