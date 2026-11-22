@@ -15,6 +15,8 @@ Read this before filling a form, the first time in a session. Filling subagents 
 - On a one-page form, fill everything else first and hand over the upload at the end, unless the form won't continue without the file: then stop there and wait.
 - Note each hand-off under "Left for you" in application-record.md until the user confirms.
 
+On iCIMS the resume is on the Candidate Profile step. When that step is already completed when you get there (the site kept the profile from an earlier application), open it before any other step, at its own address, never by its circle: the step page's address with its last part (`questions`, `eeo`, `form`) changed to `candidate` and its query changed to `mobile=true&needsRedirect=false` (`https://careers-northwind.icims.com/jobs/1234/software-intern/candidate?mobile=true&needsRedirect=false`). There, click **Replace Resume** and attach the tailored PDF even when a file of that name already shows, attach the cover letter where the step takes one, click the step's **Submit** ("iCIMS has no review page") and carry on with the step the site opens. Write on the record's Resume line `replaced on step 1 (it showed <the file name that was there>)`. If the page doesn't show Candidate Profile as the current step, or the file won't attach, stop there and hand the resume over; never go on to the last step with the resume the site kept.
+
 **Sign-ins and accounts.** Never create accounts, type passwords or enter verification codes. Hand the sign-in over like an upload:
 
 - Go as far as you can; stop on the sign-in page, or on a page that makes an account (Register, Create Account, Sign Up: name, email and password boxes), also one that opens after signing in.
