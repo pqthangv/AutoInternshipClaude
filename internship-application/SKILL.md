@@ -9,6 +9,16 @@ Find internships and turn each posting into a ready-to-submit application: a one
 
 Work through the steps without asking, unless a step says to stop or something is genuinely ambiguous.
 
+## Messages to the user
+
+Keep every message short: what happened and what the user has to do. An update is one or two lines; a checkpoint, hand-off or report stays under 120 words, apart from drafted answers the user has to see. One line per item, plain sentences, no tables. Leave out:
+
+- why something happened, or a rule you follow, unless the user asks (then answer in two or three sentences);
+- what a subagent tried, fixed or checked;
+- skip reasons (they're in the tracker and jobs.txt) and what was filled (it's in the record);
+- file paths, unless the user has to open the file;
+- anything already said, such as a "still waiting on" list that hasn't changed.
+
 ## Modes
 
 The user picks one per request, in their own words:
@@ -137,7 +147,7 @@ Add the tracker row (filling.md, "Logging the tracker row"). A posting skipped a
 
 ### 8. Report
 
-Role, company and deadline; where the files are; what you filled; what's left for the user and why; a reminder to review and submit in the open tab. In Fill all and Submit, also list what you agreed to for them. For a submitted application, give the time and the confirmation instead of the reminder.
+A few lines ("Messages to the user"): the role and company; submitted (with the time), or ready in the open tab for the user to review and submit; one line per thing left for the user, saying what to do; the deadline only when it's within a week. In Fill all and Submit, add one line naming only the agreements the record marks "(legal)" (arbitration, background, credit or drug checks, non-competes), if there were any.
 
 ## Batch runs
 
