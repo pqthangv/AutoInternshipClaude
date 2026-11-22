@@ -1164,11 +1164,15 @@
     return null;
   }
 
-  // The text a dropdown shows while nothing is chosen: "Select...", "Select One", "Choose an option", or nothing.
-  const looksEmpty = (t) => !t || /^(select|choose|search|type|start typing)\b/.test(t) || /\b(select|choose)( one| an option)?\.{0,3}$/.test(t);
+  // The text a dropdown shows while nothing is chosen: "Select...", "Select One", "Choose an option",
+  // iCIMS's "— Make a Selection —", or nothing.
+  const looksEmpty = (t) => {
+    t = (t || '').replace(/^[—–\-\s]+/, '');
+    return !t || /^(select|choose|search|type|start typing|make a selection)\b/.test(t) || /\b(select|choose)( one| an option)?\.{0,3}$/.test(t);
+  };
 
   // What the dropdown shows right now (its chosen value or placeholder), as written and lowercased.
-  const shownRaw = (d) => String(d.el.tagName === 'BUTTON' ? d.el.textContent : d.box === d.el ? d.el.value : cleanText(d.box)).replace(/\s+/g, ' ').trim();
+  const shownRaw = (d) => String(d.el.tagName === 'BUTTON' || d.icims ? d.el.textContent : d.box === d.el ? d.el.value : cleanText(d.box)).replace(/\s+/g, ' ').trim();
   const shownText = (d) => norm(shownRaw(d)).slice(0, 200);
 
   // The visible box of a combobox input: the nearest wrapper that shows its placeholder or chosen value.
@@ -1226,6 +1230,27 @@
     else noteLeft(list, stats, raw, 'search list', { required: isRequired(el, raw) });
   }
 
+  // iCIMS's own dropdown. The real <select> is hidden (class "dropdown-hide") and, on most of them, holds only
+  // an empty option; an <a role="combobox"> right after it, id "<select id>_icimsDropdown", shows the choice and
+  // opens a list (ul "<select id>_dropdown-results") that it fetches from the server on the first open, 25 at a
+  // time, with a search box on long lists. The hidden select was skipped, so these questions were missing from
+  // the report, and Claude's form_input on the select found no options (Trilogy's "attending High School?",
+  // Marzetti's State, Rivian, SAS). The list opens on mousedown and picks on a click on an item, which it
+  // copies into the select: that's what the form sends.
+  const icimsBox = (sel) => (sel.id && sel.classList.contains('dropdown-hide') ? byId(sel, `${sel.id}_icimsDropdown`) : null);
+
+  // What an iCIMS list holds now: the select's chosen option, or a saved choice it's still fetching (it shows
+  // "Loading..." meanwhile, on lists with nothing saved too, so the shown text alone can't tell).
+  function icimsChosen(d) {
+    const sel = d.icims;
+    const opt = sel.options[sel.selectedIndex];
+    if (opt && opt.value && opt.value !== '-999' && !isPlaceholderOpt(opt.text, opt.value)) return (opt.text || opt.value).trim();
+    const saved = sel.getAttribute('icimsdropdown-selected');
+    if (!saved) return '';
+    const shown = shownRaw(d);
+    return /^loading\b/i.test(shown) || looksEmpty(norm(shown)) ? saved : shown;
+  }
+
   // A full mouse click, for widgets that open or choose on mousedown (React-Select) or on click (Workday).
   function press(el) {
     const o = { bubbles: true, cancelable: true, composed: true, button: 0, view: window };
@@ -1257,9 +1282,9 @@
   // list, found no "Yes" in it, and was left for Claude.
   // Oracle's list is a grid (role=grid, one gridcell per option) rather than a listbox; it's only taken
   // from the list the dropdown points to, so a table elsewhere on the page can't be read as options.
-  function openOptions(el, before) {
+  function openOptions(el, before, listId) {
     let lists = [];
-    const id = el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
+    const id = listId || el.getAttribute('aria-controls') || el.getAttribute('aria-owns');
     if (id) { const n = byId(el, id); if (n) lists = [n]; }
     if (!lists.length) lists = shownLists().filter((l) => !(before && before.has(l)));
     const out = [];
@@ -1274,7 +1299,9 @@
   }
 
   function closeDropdown(d) {
-    if (d.typed) typeInto(d.el, '');
+    if (d.typed) typeInto(d.search || d.el, '');
+    // iCIMS reads key codes, which a script's key events don't carry; a press anywhere else closes its list.
+    if (d.icims) { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window })); return; }
     key(d.el, 'Escape');
     try { d.el.blur(); } catch (_) { /* ignore */ }
   }
@@ -1314,29 +1341,39 @@
   // page, where the button can't be scrolled to the middle. A list with no matching option isn't tried again.
   async function fillDropdown(d) {
     let r = await tryDropdown(d);
-    if (r.retry && d.el.tagName === 'BUTTON' && looksEmpty(shownText(d))) r = await tryDropdown(d);
+    if (r.retry && (d.icims ? !icimsChosen(d) : d.el.tagName === 'BUTTON' && looksEmpty(shownText(d)))) r = await tryDropdown(d);
     return r.text ? { text: r.text } : { options: r.options };
   }
 
   async function tryDropdown(d) {
-    const { el, box, res } = d;
+    const { el, box, res, icims } = d;
     await bringIntoView(box || el);
     const before = new Set(shownLists());
-    if (el.tagName === 'BUTTON') {
+    const listId = icims ? `${icims.id}_dropdown-results` : null;
+    const seen = () => openOptions(el, before, listId);
+    if (el.tagName === 'BUTTON' || icims) {
       press(el);
     } else {
       press(box);
       // React-Select also opens on the down arrow, which works even when the browser window isn't focused.
-      if (!openOptions(el, before)) key(el, 'ArrowDown');
+      if (!seen()) key(el, 'ArrowDown');
     }
-    let options = await waitFor(() => openOptions(el, before), 800);
+    // iCIMS fetches its list after the open and shows its placeholder item meanwhile: wait for a real option.
+    const ready = icims ? () => { const o = seen(); return o && o.some((x) => !isPlaceholderOpt(x.text, x.val)) ? o : null; } : seen;
+    let options = await waitFor(ready, icims ? 4000 : 800);
     let pick = options && pickOption(options, res);
 
     // Long lists (countries, schools) may only show matches after you type, so search for the answer.
-    if (!pick && el.tagName === 'INPUT' && !el.readOnly && !res.pick && !res.yesno) {
-      typeInto(el, res.value);
+    // iCIMS's search box is its own, inside the list, and it searches on key up (half a second later, then
+    // asks the server).
+    const search = icims && byId(el, `${icims.id}_icimsDropdown_ctnr`);
+    const searchBox = search && search.querySelector('input.dropdown-search:not(.dropdown-invisible)');
+    if (!pick && !res.pick && !res.yesno && ((el.tagName === 'INPUT' && !el.readOnly) || searchBox)) {
+      typeInto(searchBox || el, res.value);
+      if (searchBox) searchBox.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true }));
       d.typed = true;
-      pick = await waitFor(() => { const o = openOptions(el, before); if (o) options = o; return o && pickOption(o, res); }, 1500);
+      d.search = searchBox;
+      pick = await waitFor(() => { const o = seen(); if (o) options = o; return o && pickOption(o, res); }, searchBox ? 5000 : 1500);
     }
 
     const list = listOf(options);
@@ -1354,6 +1391,7 @@
     // and that can read like the option, so there a pick counts only once the list has closed.
     const typedBox = d.typed && d.box === d.el && d.el.tagName === 'INPUT';
     const took = () => {
+      if (icims && !icimsChosen(d)) return false; // the hidden select is what the form sends
       if (d.box === d.el && !d.el.isConnected && d.el.id) { const n = byId(d.el, d.el.id); if (n) d.el = d.box = n; }
       if (typedBox && list && list.isConnected && isVisible(list)) return false;
       const shown = shownText(d);
@@ -1679,6 +1717,20 @@
         continue;
       }
 
+      // iCIMS's own dropdown (icimsBox): the hidden select carries the question, the box after it is what's used.
+      if (tag === 'SELECT' && !isVisible(el)) {
+        const box = icimsBox(el);
+        if (box && isVisible(box) && !box.classList.contains('disabled')) { // iCIMS marks a locked list "disabled"
+          const raw = rawLabel(el);
+          const res = answerFor(p, labelFor(el), hintsFor(el), el, 'select', counters);
+          const d = { el: box, box, res, raw, icims: el };
+          const chosen = icimsChosen(d);
+          if (chosen) notePrefilled(stats, raw, chosen);
+          else dropdowns.push(d);
+        }
+        continue;
+      }
+
       // Combobox inputs (React-Select and similar). Their real input can be tiny, hidden or read-only,
       // so what has to be visible is the box around it. Oracle's street box is a combobox that only
       // suggests addresses and takes any text, so it's typed into like a text box.
@@ -1738,8 +1790,13 @@
       const required = isRequired(d.el, d.raw);
       // The site may have filled it since the first pass: Oracle fills City, County and State from the
       // ZIP code chosen just before. Never overwritten, like any other answer already there.
-      const now = d.el.tagName === 'INPUT' ? String(d.el.value || '').trim() : '';
-      if (now || !looksEmpty(shownText(d))) { notePrefilled(stats, d.raw, now || shownRaw(d)); continue; }
+      if (d.icims) {
+        const now = icimsChosen(d);
+        if (now) { notePrefilled(stats, d.raw, now); continue; }
+      } else {
+        const now = d.el.tagName === 'INPUT' ? String(d.el.value || '').trim() : '';
+        if (now || !looksEmpty(shownText(d))) { notePrefilled(stats, d.raw, now || shownRaw(d)); continue; }
+      }
       if (!d.res) { noteLeft(d.box, stats, d.raw, 'custom dropdown', { required }); continue; }
       let r;
       try { r = await fillDropdown(d); } catch (_) { r = { options: [] }; }
