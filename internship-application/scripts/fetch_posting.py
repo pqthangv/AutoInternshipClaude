@@ -4,14 +4,15 @@
 Usage:
   python fetch_posting.py URL [URL ...] --out-dir DIR [--tracker tracker.xlsx] [--profile profile.json]
   python fetch_posting.py --jobs jobs.txt --out-dir DIR [--limit N] [--tracker tracker.xlsx] [--profile profile.json [--move-skips]]
-  python fetch_posting.py --jobs jobs.txt --pick N --out-dir DIR --profile profile.json [--tracker tracker.xlsx]
+  python fetch_posting.py --jobs jobs.txt --pick N --out-dir DIR --profile profile.json [--tracker tracker.xlsx] [--refill]
 
 --pick goes down the queue until N postings are ready for one batch: it passes over lines the user held or whose
 company is in profile.json's skipCompanies, whose site is in its skipSites, or that repeat a role picked today under another link, moves screen
 skips, titles of other kinds of role (roleTypes) or another term, and other links to a role already in the tracker
 below "# done", and holds a third posting from one company, a second from one iCIMS site, and one
-past an application limit its company states. The same call again on the same day refills a batch whose postings
-dropped out later: it passes over what the earlier calls picked and counts them toward the limits. See pick_batch().
+past an application limit its company states. The same call again with --refill refills a batch whose postings
+dropped out later: it passes over what the earlier calls picked and counts them toward the limits. Without --refill,
+a folder that already holds an earlier batch's postings is refused. See pick_batch().
 
 Supported: Greenhouse (job boards, embedded forms, and company career pages with ?gh_jid=), Ashby, Lever,
 Workday (myworkdayjobs.com and myworkdaysite.com), SmartRecruiters, Rippling and Oracle (oraclecloud.com). On
@@ -1447,6 +1448,32 @@ def with_tag(line, tag):
     return f'{base} | {tag}' if tag else base
 
 
+PICK_NUMBER = '.pick-number'
+
+
+def earlier_numbers(out_dir):
+    """The numbers earlier --pick calls used in out_dir: its posting files' (`NN Company - Role.md`) and the last
+    one, kept in .pick-number, since unread and closed postings take a number but write no file."""
+    if not os.path.isdir(out_dir):
+        return []
+    nums = [int(m.group(1)) for f in os.listdir(out_dir) for m in [re.match(r'(\d+) ', f)] if m]
+    try:
+        last = int(open(os.path.join(out_dir, PICK_NUMBER), encoding='utf-8').read().strip() or 0)
+    except (OSError, ValueError):
+        last = 0
+    return nums + ([last] if last else [])
+
+
+def summary_line(item, judge=False):
+    """One short line per posting for the end of the --pick output."""
+    who = item.get('company') or item['url']
+    if item.get('company') and item.get('role'):
+        who += f": {item['role']}"
+    notes = [n for n, on in (('closes soon', item.get('closes_soon')), ('read in the browser', not item.get('ok')),
+                             ('to judge', judge)) if on]
+    return f"{item['order']:02d} {who}" + (f" ({', '.join(notes)})" if notes else '')
+
+
 def pick_batch(a, status, rows, tracker_note):
     """Go down the queue until a.pick postings are ready, for one batch.
 
@@ -1461,8 +1488,20 @@ def pick_batch(a, status, rows, tracker_note):
     Picks still drop out after this (unread postings that turn out closed, a rule only the full posting shows), so
     a batch calls again with the number missing. On 2026-11-20, when a second call wasn't allowed, batches of 6, 6
     and 10 went ahead with 4, 2 and 4. A later call that day passes over the lines the earlier ones marked, counts
-    them toward the caps, and numbers its files and `order` after the earlier calls' (kept in out_dir).
+    them toward the caps, and with --refill numbers its files and `order` after the earlier calls' (kept in out_dir).
     """
+    # A new batch in a folder an earlier batch used gets mixed up with it. On 2026-11-21 the day's second batch
+    # reused "ia-2026-11-21": its picks were numbered 16-22 after the first batch's 01-15 (the refill numbering
+    # below), and main, its copy of this output cut by `tail`, listed the folder and took the first six files, all
+    # applied to that morning. Only a refill may add to a folder that holds postings, and a refused call writes
+    # nothing, so jobs.txt gets no `picked` marks that the retry would then pass over.
+    used = earlier_numbers(a.out_dir)
+    if used and not a.refill:
+        print(json.dumps({'ok': False, 'error': (
+            f'{a.out_dir} already holds postings {min(used):02d} to {max(used):02d} from an earlier batch. For a new '
+            'batch, make a new scratch folder (with the date and time in its name) and pass its postings folder; '
+            'add --refill only to refill the batch that folder belongs to.')}, ensure_ascii=False))
+        return 1
     prof = json.load(open(a.profile, encoding='utf-8-sig'))
     wanted, skips, term = fi.wanted_roles(prof), fi.skip_names(prof), fi.profile_term(prof)
     sites = fi.skip_sites(prof)
@@ -1484,13 +1523,9 @@ def pick_batch(a, status, rows, tracker_note):
     picks, judge, taken, hosts, blocked = [], [], [], set(), set()
     attempts, ceiling = 0, max(15, 4 * a.pick)
     # A refill writes into the same folder: number after what's there, so its files and `order` follow the first
-    # call's. Unread and closed postings take a number but write no file, so the last number is kept in a file too.
-    counter = os.path.join(a.out_dir, '.pick-number')
-    try:
-        last = int(open(counter, encoding='utf-8').read().strip() or 0)
-    except (OSError, ValueError):
-        last = 0
-    start = max([last] + [int(m.group(1)) for f in os.listdir(a.out_dir) for m in [re.match(r'(\d+) ', f)] if m])
+    # call's.
+    counter = os.path.join(a.out_dir, PICK_NUMBER)
+    start = max([0] + used)
     stopped = None
     day = today.isoformat()
     not_role = f'not a {fi.role_words(wanted)} role'
@@ -1682,6 +1717,12 @@ def pick_batch(a, status, rows, tracker_note):
         out.update(blocked_hint(blocked))
     if tracker_note:
         out['tracker_note'] = tracker_note
+    # Last, so it survives a `tail`: main has cut this output and then listed the folder for the rest, which loses
+    # unread picks (they have no file) and takes in any other batch's files there. In the order batch.md takes them
+    # (closing soon first, then `order`), checks among the picks: a check listed after them would never be taken.
+    both = [(it, False) for it in picks] + [(it, True) for it in judge]
+    both.sort(key=lambda x: (not x[0].get('closes_soon'), x[0]['order']))
+    out['summary'] = [summary_line(it, judge=j) for it, j in both]
     print(json.dumps(out, indent=1, ensure_ascii=False, default=str))
     return 0
 
@@ -1697,6 +1738,7 @@ def main():
     ap.add_argument('--limit', type=int, help='with --jobs, only the first N links')
     ap.add_argument('--pick', type=int, help='with --jobs and --profile: go down the queue until N postings are ready for a batch, '
                                              'updating jobs.txt (skips moved below "# done", holds and picks marked)')
+    ap.add_argument('--refill', action='store_true', help='with --pick: add to the batch whose postings are in --out-dir')
     ap.add_argument('--out-dir', required=True, help='where the posting files go (scratch space)')
     ap.add_argument('--tracker', help='tracker.xlsx, to list rows already there for the same company')
     ap.add_argument('--profile', help="profile.json, to screen each posting against the user's status and degree")
@@ -1717,6 +1759,9 @@ def main():
     if a.tracker and os.path.isfile(a.tracker):  # never let a lookup create the tracker
         rows, tracker_note = tracker_rows(a.tracker)
 
+    if a.refill and not a.pick:
+        print(json.dumps({'ok': False, 'error': '--refill goes with --pick'}))
+        return 1
     if a.pick:
         if not (a.jobs and status) or a.urls:
             print(json.dumps({'ok': False, 'error': '--pick needs --jobs and --profile, and no links'}))
