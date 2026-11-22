@@ -45,7 +45,7 @@ Per application: fill as in Fill all, write application-record.md and log the ro
 On the last page before Submit (Workday's review page, iCIMS's final form), all of these must hold:
 
 1. Every required field is filled, and the page shows no error or warning.
-2. The attached resume is this job's tailored PDF (its file name shows on the page), and an attached or pasted cover letter is this job's (its file name or text names this company).
+2. The attached resume is this job's tailored PDF (its file name shows on the page; on iCIMS, whose final form doesn't show it, application-record.md shows it was attached or replaced on Candidate Profile in this application, not kept from an earlier one), and an attached or pasted cover letter is this job's (its file name or text names this company).
 3. Each written answer on the page is the one drafted for this posting, and the user saw it at the checkpoint or in the hand-off (unless they said auto).
 4. Nothing required is open: nothing on the extension's Left list, no unanswered question, no box left because it charges money.
 5. Every answer came from the profile, the master resume, the user or this posting; sponsorship and self-identification only from the profile.
