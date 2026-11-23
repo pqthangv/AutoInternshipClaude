@@ -17,7 +17,7 @@ Everything stays in your browser's local extension storage on your device. It is
 
 ## How it's used
 
-Only to fill job application forms, when you ask: by clicking **Fill with AutoInternship** on the page, **Fill this page** in the popup, or the keyboard shortcut. It reads the form's questions on that page, matches them to your profile and types the answers in. The answers go to that site's form, as if you had typed them (the popup and the shortcut also attach your stored resume), and a short report of what it filled is added to the same page, where the site can see it too. The report lists the answers it typed, and can include a profile value the site had filled in differently (your name, for example). It keeps nothing from the pages you visit.
+Only to fill job application forms, when you ask: by clicking **Fill with AutoInternship** on the page, **Fill this page** in the popup, or the keyboard shortcut. It reads the form's questions on that page, matches them to your profile and types the answers in. The answers go to that site's form, as if you had typed them (the popup and the shortcut also attach your stored resume), and a short report of what it filled is added to the same page, where the site can see it too. The report lists the answers it typed, and can include a profile value the site had filled in differently (your name, for example). Where a form's upload box is hidden inside the site's page components, it adds a plain file box below it; a file you (or Claude) put there goes to that form's upload box, as if you had picked it there, and isn't kept. It keeps nothing from the pages you visit.
 
 ## What it never does
 
