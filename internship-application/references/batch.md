@@ -120,7 +120,10 @@ Stop on a sign-in page or a page that only makes an account (Register, Create Ac
 step above) and hand it over; never fill those.
 If the user's sign-in shows an error, stay on that page and put the error word for word on the For the user line.
 Don't leave the step that takes the resume until it shows the tailored PDF's file name; if you can't attach
-it there (on iCIMS, Replace Resume shows the file box), stop on that step and hand it over.
+it there (on iCIMS, Replace Resume shows the file box), stop on that step and hand it over. When find shows no
+file box, attach to the extension's "Resume file (AutoInternship)" box (on SmartRecruiters the Resume one lower
+down, never Easy Apply's at the top, and before pressing the Fill button); the line under it should say "The form
+shows <file name>", else one screenshot of the form's box decides (filling.md, "Attaching files").
 On iCIMS, when Candidate Profile is already completed when you get there, open it first at its own address,
 never by its circle: the step page's address with its last part changed to candidate and its query to
 mobile=true&needsRedirect=false. Replace the resume even when a file of that name shows, click its Submit, and
