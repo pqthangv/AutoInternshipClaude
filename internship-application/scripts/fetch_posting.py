@@ -411,6 +411,10 @@ def oracle(p):
 
 def smartrecruiters(p):
     d = get(f"https://api.smartrecruiters.com/v1/companies/{p['company']}/postings/{p['id']}", gone=True)
+    # An expired posting still answers, with "active": false, and its page says it expired (Pilot Company ×5 and
+    # ten others, 2026-11-22). Open ones say true.
+    if d.get('active') is False:
+        raise Closed('closed: the site says this posting has expired.')
     loc = d.get('location') or {}
     where = loc.get('fullLocation') or ', '.join(x for x in (loc.get('city'), loc.get('region')) if x)
     where += ' (remote)' if loc.get('remote') else ' (hybrid)' if loc.get('hybrid') else ''
@@ -447,8 +451,8 @@ def rippling(p):
             'questions': [], 'self_id': [], 'consent': [], 'form_note': ''}
 
 
-def page(url):
-    final, body = get(url, raw=True, headers={'Accept': 'text/html'})
+def page(url, gone=False):
+    final, body = get(url, raw=True, headers={'Accept': 'text/html'}, gone=gone)
     return final, body
 
 
@@ -553,17 +557,24 @@ def icims_behind(url, body):
     return icims_apply(*pick[0]) if len(pick) == 1 else None
 
 
-# A closed posting's page on a SuccessFactors career site (jobs.<company>.com/job/...?ats=successfactors). Open ones
-# carry the description in class="jobdescription" and never this line (PACCAR closed ×2, Westinghouse and NextEra
-# open, 2026-11-20).
-CLOSED_PAGE = re.compile(r'\bThis job is currently unposted\b', re.I)
+# A closed posting's page on a SuccessFactors career site (jobs.<company>.com/job/...?ats=successfactors): "This job
+# is currently unposted" (PACCAR ×2, 2026-11-20), "Sorry, this position has been filled" (McDonald's ×4, 2026-11-22,
+# one of which a batch then opened in the browser). Open ones carry the description in class="jobdescription" and
+# never these lines (Westinghouse, NextEra, Edison ×5, Acuity ×3, AGCO, HF Sinclair). Read from the visible text only,
+# since a site's scripts can carry the wording for every state a posting can be in.
+CLOSED_PAGE = re.compile(r'\b(this job is currently unposted|this (position|job|role|opening) has (already )?been filled)\b', re.I)
+
+
+def visible_text(body):
+    text = re.sub(r'(?is)<(script|style|noscript|template)\b.*?</\1>', ' ', body)
+    return re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', ' ', text)))
 
 
 def other(p):
     """A site without a reader of its own: its page's JobPosting data, if it has one."""
     final, body = page(p['url'])
     j = json_ld_posting(body)
-    if not j and CLOSED_PAGE.search(body):
+    if not j and 'class="jobdescription' not in body and CLOSED_PAGE.search(visible_text(body)):
         raise Closed('closed: the site says this posting no longer exists.')
     if not j:
         raise Failed('not a site with public job data here. Open it in the browser.')
@@ -593,7 +604,8 @@ def atlassian(p):
 
 def icims(p):
     # The job page with in_iframe=1 is the posting without the company's site around it, with its JobPosting data.
-    final, body = page(f"https://{p['host']}/jobs/{p['id']}/job?in_iframe=1")
+    # A closed posting answers 410 Gone (Alaska Air 21281, which a batch then opened in the browser, 2026-11-22).
+    final, body = page(f"https://{p['host']}/jobs/{p['id']}/job?in_iframe=1", gone=True)
     j = json_ld_posting(body)
     if not j:
         raise Failed("couldn't read this iCIMS page's job data (the posting may have closed). Open it in the browser.")
@@ -770,7 +782,12 @@ PERMANENT_AUTH = re.compile(r'\bpermanent\b[^.]{0,30}\b(work|employment)\s+autho
 PREFERRED_HEAD = re.compile(r'\b(prefer\w*|nice to have|bonus|pluses|desired|ideal\w*)\b', re.I)
 HEADING_WORDS = re.compile(r'\b(qualifications?|requirements?|skills|about|what you|who you|you will|you\'ll|we\'re looking|we are looking|'
                            r'responsibilit\w*|benefits|nice to have|bonus|preferred|minimum|basic|required|desired|eligibility|education)\b', re.I)
-UNRESTRICTED = re.compile(r'\b(unrestricted|without (any )?restrictions?)\b[^.]{0,40}\b(right to work|work authori[sz]ation)\b')
+# "Candidate must possess unrestricted authorization to work in the United States" (Molina, 2026-11-22) too.
+UNRESTRICTED = re.compile(r'\b(unrestricted|without (any )?restrictions?)\b[^.]{0,40}\b(right to work|work authori[sz]ation|authori[sz](ation|ed) to work)\b'
+                          r'|\bauthori[sz]ed to work\b[^.]{0,60}\bwithout (any )?restrictions?\b')
+# The posting naming the role as one of a kind the user doesn't want: "the Workplace AI Pre-Sales internship" (Trace3,
+# 2026-11-22), whose title ("Workplace AI Intern") reads as AI work. Only ever a check: main reads the posting.
+SELF_KIND = re.compile(r'\b(pre-?sales|sales|marketing|business development|account management|recruiting)\s+(internships?|interns?|role|position)\b')
 NO_SPONSOR = re.compile(r'\b(not|unable to|cannot|won\'?t|will not|does not|do not)\b[^.]{0,40}\bsponsor')
 GRAD_ONLY = re.compile(r'\b(ph\.?\s?d|doctoral|doctorate|master[\'’]?s|mba|graduate (degree|program|student)s?)\b')
 UNDERGRAD = re.compile(r'\b(bachelor\w*|undergrad\w*|bs|ba|bsc|beng|bachelors|baccalaureate|freshm[ae]n|sophomores?|juniors?|seniors?)\b'
@@ -787,7 +804,7 @@ def undotted(s):
 def user_status(prof):
     """What the screen needs from profile.json: citizen (True/False/None), permanent resident, visa, degree, below senior."""
     sys.path.insert(0, HERE)
-    from find_internships import below_senior, degree_level  # same readings as the queue search
+    from find_internships import below_senior, degree_level, wanted_roles  # same readings as the queue search
     # profile.json has no citizenship field of its own (autointernship/shared.js defaults()); a visa in workAuthDetails,
     # or needing sponsorship, means not a citizen or permanent resident, as find_internships.py reads it too.
     cz, auth = norm(prof.get('citizenship')), norm(prof.get('workAuthDetails'))
@@ -812,7 +829,7 @@ def user_status(prof):
             'available_from': days[0][2] if days else None, 'available_text': avail, 'year': days[0][2].year if days else year,
             # the last day the user can work: a month alone ("August 2027") means its last day
             'available_until': ends[-1][3] if ends else None, 'available_until_text': until,
-            'season': term.group(1).lower() if term else None}
+            'season': term.group(1).lower() if term else None, 'wanted': wanted_roles(prof)}
 
 
 MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
@@ -859,8 +876,9 @@ def dates_in(text, year):
 
 # A start date the posting sets: "must be available to start on May 17", "the program runs from May 26 to August 14",
 # "Internship program begins Monday, May 24, 2027". Not dates about applying, interviews, graduation or offers.
-# "This is a 10-week program, May 24th - July 30th" (Lowe's) names the program's dates without a start word.
-START_WORDS = re.compile(r'\b(start(s|ing)?|begin(s|ning)?|commenc(e|es|ing)|kicks? off|first day|report(ing)? date|runs from|'
+# "This is a 10-week program, May 24th - July 30th" (Lowe's) names the program's dates without a start word, and so
+# does "Time Frame: June 1, 2027, through August 6, 2027" (TruStage, 2026-11-22).
+START_WORDS = re.compile(r'\b(start(s|ing)?|begin(s|ning)?|commenc(e|es|ing)|kicks? off|first day|report(ing)? date|runs from|time ?frame|'
                          r'(program|internship|cohort) (runs|dates?|period|will run|takes place)|work (period|dates?)|available (from|beginning)|'
                          r'\d{1,2}[- ]weeks? (summer )?(program|internship))\b')
 NOT_START = re.compile(r'\b(appl(y|ied|ying|ications?)|deadline|posted|interview\w*|clos(e|es|ing)|review(ed|ing)?|graduat\w*|offers?|'
@@ -871,15 +889,18 @@ START_HEDGE = re.compile(r'\b(typically|usually|generally|normally|tentative\w*|
                          r'ideally|may|might|expected|estimated|anticipated|tbd|subject to change|or later|later start|var(y|ies)|depending|negotiable)\b')
 
 
-def early_start(low, st):
+def early_start(low, st, several_terms=True):
     """'skip' or 'check' when the sentence sets a start date before the user's availableFrom, else None. Every start
-    date it offers has to be too early ("June 1 or June 15" with June 10 is fine); in a range, only the first counts."""
+    date it offers has to be too early ("June 1 or June 15" with June 10 is fine); in a range, only the first counts.
+    several_terms: the posting also names the user's term, so a line about another one is about that other term."""
     first = st.get('available_from')
     if not first or NOT_START.search(low) or START_ANY_LATER.search(low):
         return None
-    # A line about another term in a posting that lists several ("Winter (Starts January/February 2027)")
+    # A line about another term in a posting that lists several ("Winter (Starts January/February 2027)"). In a posting
+    # that never names the user's term, it's the posting's own: "Cloud Engineer Intern or Co-op (2027 Spring Semester)
+    # starting in January 2027" (Vestmark, 2026-11-22, which went to a batch as a summer internship).
     seasons = set(re.findall(r'\b(winter|spring|summer|fall|autumn)\b', low))
-    if seasons and st.get('season') and st['season'] not in seasons:
+    if several_terms and seasons and st.get('season') and st['season'] not in seasons:
         return None
     word = START_WORDS.search(low)
     if not word:
@@ -1037,6 +1058,17 @@ def screen(p, st):
     summer = summer_only(st)
     if summer and (YEAR_ROUND.search(title) or PART_TIME.search(title)):  # "Intern - Year Round", "Part-Time Student"
         hits.append(('check', 'part-time or year-round', p['role']))
+    # Whether the posting names the user's term anywhere; if not, a line about another term is about this one.
+    several = bool(st.get('season')) and bool(re.search(rf"\b{st['season']}\b", f"{title} {p['description'] or ''}".lower()))
+    # A start date set only in the form: "Can you commit to attending the full ... Program, starting on June 7, 2027
+    # and finishing on August 6, 2027?" (ParetoHealth, 2026-11-22; its text said only "June through August"). Only
+    # yes/no and other choice questions: a box asking when the user can start sets nothing.
+    for q in p.get('questions') or []:
+        label = undotted(str(q.get('label') or ''))
+        if q.get('options') and not re.search(r'\b(e\.?g|for example|such as)\b', label, re.I):
+            early = early_start(label.lower(), st, several)
+            if early:
+                hits.append((early, f"starts before {st['available_text']}", label))
 
     prev = ''
     for s, preferred, required in sentences(html.unescape(p['description'] or '')):  # some job data is escaped twice ("&#xa;")
@@ -1098,9 +1130,12 @@ def screen(p, st):
             hits.append(('check', 'degree level', s))
         elif st['below_senior'] is False and st['sponsor'] and NO_SPONSOR.search(low):
             hits.append(('check', 'sponsorship', s))
-        early = early_start(low, st)
+        early = early_start(low, st, several)
         if early:
             hits.append((early, f"starts before {st['available_text']}", s))
+        kind = SELF_KIND.search(low)
+        if kind and st.get('wanted') and fi.role_fits(kind.group(0), st['wanted']) is False:
+            hits.append(('check', f'described as a {kind.group(1)} role', s))
         length = too_long(low, st)
         if length:
             hits.append(('check', f"lasts {length}, longer than {st['available_text']} to {st['available_until_text']}", s))
