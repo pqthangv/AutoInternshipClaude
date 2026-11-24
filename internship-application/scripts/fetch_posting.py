@@ -25,10 +25,10 @@ browser as before. LinkedIn is never read.
 --profile screens each posting against the user's status, degree and availability before anyone tailors for it:
 "skip" when it plainly rules the user out (excludes F-1 students or temporary visas, no CPT or OPT, permanent work
 authorization, citizenship, U.S. person status or a clearance the user can't have, a graduate-only role for an
-undergraduate, a set start date before availableFrom, in the text or as work months in the title, a posting the
-site says no longer exists), "check" for wording a person should judge (a minimum length longer than availableFrom
-to availableUntil, or work in the school year for a user free only in the summer, among them), else "ok", with the
-sentences behind it. Sponsorship alone never skips: below
+undergraduate, a set start date or work dates before availableFrom, in the text, a form question or as work
+months in the title, a posting the site says no longer exists), "check" for wording a person should judge (a
+minimum length longer than availableFrom to availableUntil, or work in the school year for a user free only in the
+summer, among them), else "ok", with the sentences behind it. Sponsorship alone never skips: below
 senior year it doesn't stop an application (SKILL.md step 2). --move-skips (with --jobs) moves skipped lines
 below "# done" with the reason, so no batch picks them again. Batch 2026-11-08 spent $2.41 of $17.76 on four
 tailoring agents for postings that were then skipped.
@@ -886,7 +886,7 @@ NOT_START = re.compile(r'\b(appl(y|ied|ying|ications?)|deadline|posted|interview
 # "Interns may start as early as May 18" or "June 1 or later" sets no limit on a later start.
 START_ANY_LATER = re.compile(r'\b(as early as|or later|or after|no earlier than|at the earliest)\b')
 START_HEDGE = re.compile(r'\b(typically|usually|generally|normally|tentative\w*|approximately|approx|around|roughly|flexib\w*|prefer\w*|'
-                         r'ideally|may|might|expected|estimated|anticipated|tbd|subject to change|or later|later start|var(y|ies)|depending|negotiable)\b')
+                         r'ideal\w*|may|might|expected|estimated|anticipated|tbd|subject to change|or later|later start|var(y|ies)|depending|negotiable)\b')
 
 
 def early_start(low, st, several_terms=True):
@@ -941,6 +941,101 @@ def title_early(title, st):
     if not y1 and MONTH_ABBR.index(start[:3]) > MONTH_ABBR.index(end[:3]):
         y1 = str(int(y2 or st.get('year') or dt.date.today().year) - 1)
     return early_start(f"runs from {start} {y1 or ''} to {end} {y2 or ''}", st)
+
+
+# A work period written as a date range with no start word, which early_start() doesn't read: "Position Dates:
+# June 7, 2027 – August 13, 2027" (Insulet), "Duration: May-August 2027", "Option 1: May 24, 2027 – August 6, 2027"
+# (ICE), "planned to occur between Monday, May 17 and Friday, August 6, 2027" (Panasonic), "10-week paid internship
+# (June 1 - August 6)" (National Life), "the 8-week summer program (6/7-7/30)" (UDig), "Summer 2027: May – August"
+# (Persona), "available to work full-time from June 7, 2027 to August 13, 2027" (Tanium). In the 2026-11-22/23
+# batches about 15 such postings were tailored for and then skipped by hand.
+WEEKDAY = r'(?:(?:mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?\.?,?\s+)?'
+DAY_YEAR = r'(?:\s+(\d{1,2})(?:st|nd|rd|th)?\b)?(?:,?\s+(20\d\d))?'
+NAMED_RANGE = re.compile(rf'\b(between\s+)?{WEEKDAY}{MONTH_NAME}\.?{DAY_YEAR},?\s*(-|–|—|\bto\b|\bthrough\b|\bthru\b|\buntil\b|\band\b)\s*'
+                         rf'(?:(?:early|mid|late)\s*-?\s*)?{WEEKDAY}{MONTH_NAME}\.?{DAY_YEAR}')
+NUM_RANGE = re.compile(r'(?<![\d/])(\d{1,2})/(\d{1,2})(?:/(20\d\d))?\s*(?:-|–|—|\bto\b|\bthrough\b|\buntil\b)\s*'
+                       r'(\d{1,2})/(\d{1,2})(?:/(20\d\d))?(?![\d/])(?!\s*(time|fte|of|days?|hours?|weeks?)\b)')  # not "1/2-3/4 time"
+# The sentence has to be about the job's own dates. Ranges about school, perks or the office aren't
+# ("enrolled for the January – May 2027 semester", "Summer Fridays (May – September)").
+PERIOD_CONTEXT = re.compile(r'\b(intern\w*|co-?ops?|programs?|position|term|dates?|duration|periods?|timing|sessions?|'
+                            r'cohort|assignment|placement|rotation|availab\w*|full[- ]time|employment)\b')
+NOT_PERIOD = re.compile(r'\b(summer fridays?|holidays?|benefits?|enroll\w*|academic|classes|coursework|tuition|open house|blackout|'
+                        r'postings?|remains? open|open (from|until|through))\b')  # "This posting will remain open from ..."
+# "Option 1: ...", "Timing: ...", "Summer 2027: ...": a short label, then the range
+PERIOD_LABEL = re.compile(r"^[a-z0-9][a-z0-9 &/()'.-]{0,40}:\s*$")
+PERIOD_MIN_DAYS = 46  # a shorter range is a window to start in ("start between May 24 and June 7"), not the job
+# Right after a start word, a range is when the job may start ("a 12-consecutive-week, in-person internship
+# starting between May and July", Reliable Robotics), so its end is the latest start.
+START_WINDOW = re.compile(r'\b(start\w*|begin\w*|commenc\w*)(\s+\S+){0,2}\s*$')
+
+
+def period_dates(m1, d1, y1, m2, d2, y2, year):
+    """(first day, last day it could start, end) of a range; a month alone spans the month. Missing years come
+    from the other end, else the term's year; "September – May 2027" starts the year before."""
+    import calendar
+    y1, y2 = (int(y1) if y1 else None), (int(y2) if y2 else None)
+    if y2 is None:
+        y2 = (y1 + (m1 > m2)) if y1 else year
+    if y1 is None:
+        y1 = y2 - 1 if m1 > m2 else y2
+    try:
+        first = dt.date(y1, m1, d1 or 1)
+        latest = dt.date(y1, m1, d1 or calendar.monthrange(y1, m1)[1])
+        end = dt.date(y2, m2, d2 or calendar.monthrange(y2, m2)[1])
+    except ValueError:
+        return None
+    return first, latest, end
+
+
+def work_periods(low, st, several_terms=True, context=False):
+    """The work periods a sentence gives as date ranges: [(latest start day, hedged, start has a day)]. Only ranges
+    of the term's year that last PERIOD_MIN_DAYS or more. context: the sentence is a choice under a question about
+    the job's dates, so it needs no context word of its own."""
+    year = st.get('year')
+    if not st.get('available_from') or NOT_START.search(low) or NOT_PERIOD.search(low) or START_ANY_LATER.search(low):
+        return []
+    seasons = set(re.findall(r'\b(winter|spring|summer|fall|autumn)\b', low))
+    if several_terms and seasons and st.get('season') and st['season'] not in seasons:
+        return []  # "Fall 2027: August – December" in a posting that lists several terms
+    found = []
+    for m in NAMED_RANGE.finditer(low):
+        if m.group(5) == 'and' and not m.group(1):
+            continue  # "May and June" is a list; "between May 17 and August 6" is a range
+        m1, m2 = MONTH_ABBR.index(m.group(2)[:3]) + 1, MONTH_ABBR.index(m.group(6)[:3]) + 1
+        d1, d2 = (int(m.group(3)) if m.group(3) else None), (int(m.group(7)) if m.group(7) else None)
+        found.append((m.start(), m.end(), period_dates(m1, d1, m.group(4), m2, d2, m.group(8), year)))
+    for m in NUM_RANGE.finditer(low):
+        a, b = (int(m.group(1)), int(m.group(2))), (int(m.group(4)), int(m.group(5)))
+        if 1 <= a[0] <= 12 and 1 <= b[0] <= 12:
+            found.append((m.start(), m.end(), period_dates(a[0], a[1], m.group(3), b[0], b[1], m.group(6), year)))
+    # A range that has already begun isn't the job's coming dates ("Posting Period: 10/20/2026 - 01/15/2027").
+    today = dt.date.today()
+    found = [(s, e, p) for s, e, p in found
+             if p and p[2].year == year and (p[2] - p[0]).days >= PERIOD_MIN_DAYS and p[0] > today]
+    if not found:
+        return []
+    found = [(s, e, (p[0], p[2], p[2]) if START_WINDOW.search(low[:s]) else p) for s, e, p in found]
+    if not (context or PERIOD_CONTEXT.search(low) or PERIOD_LABEL.match(low[:min(s for s, _, _ in found)])):
+        return []
+    plain = low
+    for s, e, _ in sorted(found, reverse=True):
+        plain = plain[:s] + ' ' + plain[e:]
+    for s, e, _, _ in reversed(dates_in(plain, year)):  # "in May" isn't the hedge "may"
+        plain = plain[:s] + ' ' + plain[e:]
+    hedged = bool(START_HEDGE.search(plain))
+    # Months alone over five months or more ("a full-time internship between May–September", "January to August
+    # 2027") name the season or a long co-op term the job falls in, not its dates: a check.
+    out = []
+    for s, e, p in found:
+        days = bool(re.search(r'\d{1,2}\b', re.sub(r'20\d\d', '', low[s:e])))
+        out.append((p[1], hedged or (not days and months(p) >= 5), days and p[0] == p[1]))
+    return out
+
+
+def months(period):
+    """Calendar months a period touches: May to September is 5."""
+    first, _, end = period
+    return (end.year - first.year) * 12 + end.month - first.month + 1
 
 
 # A length the user's window (availableFrom to availableUntil) is too short for: "Available for a 4+ month co-op"
@@ -1016,20 +1111,26 @@ def sentences(text):
     """(sentence, under a "Preferred" heading, under a "Required" heading) triples. A heading is a "###" line or a
     short line with no full stop ("Preferred Qualifications", "Minimum Qualifications:"). Lines under a required
     heading are requirements even without "must" ("- U.S. Citizen or Permanent Residency")."""
-    out, preferred, required = [], False, False
+    out, preferred, required, listed = [], False, False, False
     for raw in str(text or '').split('\n'):
         line = raw.strip()
         if not line:
             continue
+        bullet = line.startswith(('-', '*'))
         lead = re.match(r'^(#+\s*)?((?:minimum|basic|required|preferred|desired|additional|bonus)?\s*(?:qualifications|requirements|skills)[^:.]{0,40}:|nice to have:?|preferred:)', line, re.I)
-        heading = line.startswith('#') or (not line.startswith(('-', '*')) and len(line) <= 70 and not re.search(r'[.!?]$', line)
+        heading = line.startswith('#') or (not bullet and len(line) <= 70 and not re.search(r'[.!?]$', line)
                                            and HEADING_WORDS.search(line))
         if lead or heading:
             head = lead.group(0) if lead else line
             preferred = bool(PREFERRED_HEAD.search(head))
             required = not preferred and bool(REQUIRED_HEAD.search(head))
-        elif len(line) > 100 and not line.startswith(('-', '*')):
-            preferred = required = False  # a paragraph after the list ends it (Amca's ITAR paragraph under "Preferred Skills")
+            listed = False
+        elif (len(line) > 100 or listed) and not bullet:
+            # A paragraph after the list ends it (Amca's ITAR paragraph under "Preferred Skills"), and so does any
+            # plain line after its bullets: "Start Date: May 17, 2027" after IDEMIA's "Preferred Qualifications"
+            # bullets isn't a preference.
+            preferred = required = False
+        listed = listed or bullet
         # The heading line itself isn't one of the requirements under it ("Security Clearance & Other Requirements:").
         under = required and not ((lead and len(line) == len(lead.group(0))) or (heading and not lead))
         line = ABBREV.sub(lambda m: m.group(0).replace('.', '\x00'), re.sub(r'^[\s#*-]+', '', line).strip())
@@ -1063,12 +1164,43 @@ def screen(p, st):
     # A start date set only in the form: "Can you commit to attending the full ... Program, starting on June 7, 2027
     # and finishing on August 6, 2027?" (ParetoHealth, 2026-11-22; its text said only "June through August"). Only
     # yes/no and other choice questions: a box asking when the user can start sets nothing.
+    # Work periods given as date ranges, over the whole posting: (latest start day, hedged, start has a day, under a
+    # Preferred heading, sentence). One that starts late enough means the user can take it ("Option 2: June 14 –
+    # August 20").
+    periods = []
     for q in p.get('questions') or []:
         label = undotted(str(q.get('label') or ''))
         if q.get('options') and not re.search(r'\b(e\.?g|for example|such as)\b', label, re.I):
             early = early_start(label.lower(), st, several)
             if early:
                 hits.append((early, f"starts before {st['available_text']}", label))
+                continue
+            low_label = label.lower()
+            if re.search(r'\binterest', low_label):
+                continue  # "Would you be interested ... in a combined Spring and Summer internship (January to August)?"
+            # "Are you available to work ... from May 17, 2027 to August 13th, 2027?" (Minitab)
+            periods += [(d, h, x, False, label) for d, h, x in work_periods(low_label, st, several)]
+            # Dates in the choices: "Which term would you like to be considered for an internship?" with
+            # "Summer 2027 (May 24 - August 13)" (Persona): the choices naming the user's term, or all when none
+            # names a term. Choices naming only other terms are other times ("What other internship times are
+            # you open to?" with "Winter 2027 (Jan 2027 through April 2027)", Quadrillion).
+            if PERIOD_CONTEXT.search(low_label) and not NOT_START.search(low_label):
+                opts = [undotted(str(o)) for o in q['options']]
+                named = [o for o in opts if re.search(r'\b(winter|spring|summer|fall|autumn)\b', o, re.I)]
+                own = [o for o in named if st.get('season') and re.search(rf"\b{st['season']}\b", o, re.I)]
+                for o in (own if named else opts):
+                    periods += [(d, h, x, False, f'{label} {o}') for d, h, x in work_periods(o.lower(), st, False, context=True)]
+
+    def start_dates(low, s, preferred, demote):
+        """A set start date (early_start) or work periods (into `periods`) in one sentence. demote: make a skip a
+        check here, under a "Preferred" heading ("Preferred: able to start mid-May")."""
+        early = early_start(low, st, several)
+        if early:
+            return [('check' if demote else early, f"starts before {st['available_text']}", s)]
+        word = START_WORDS.search(low)
+        if not (word and any(d[0] >= word.start() for d in dates_in(low, st['year']))):  # early_start read those
+            periods.extend((d, h, x, preferred, s) for d, h, x in work_periods(low, st, several))
+        return []
 
     prev = ''
     for s, preferred, required in sentences(html.unescape(p['description'] or '')):  # some job data is escaped twice ("&#xa;")
@@ -1082,7 +1214,10 @@ def screen(p, st):
         needed = (REQUIRE.search(low) or required or LABELLED.search(low)) and not NOT_REQUIRED.search(low)
         may = re.search(r'\bmay\b', low)
         if SHORT_HEADING.search(low.strip()) and not (REQUIRE.search(low) or required):
-            continue  # a bare heading ("Security Clearance") says nothing yet; the lines under it do
+            # a bare heading ("Security Clearance") says nothing yet; the lines under it do. A short line can still
+            # give the dates ("Duration: May-August 2027").
+            hits += start_dates(low, s, preferred, preferred)
+            continue
         cpt = re.search(r'\bCPT\b', cased) or 'curricular practical training' in low
         support = NO_SUPPORT.search(low)
         follows = INCLUDES.search(low) and (cpt or VISA.search(low)) and NO_SPONSOR_BEFORE.search(last)
@@ -1130,9 +1265,7 @@ def screen(p, st):
             hits.append(('check', 'degree level', s))
         elif st['below_senior'] is False and st['sponsor'] and NO_SPONSOR.search(low):
             hits.append(('check', 'sponsorship', s))
-        early = early_start(low, st, several)
-        if early:
-            hits.append((early, f"starts before {st['available_text']}", s))
+        hits += start_dates(low, s, preferred, False)  # the Preferred check below demotes it
         kind = SELF_KIND.search(low)
         if kind and st.get('wanted') and fi.role_fits(kind.group(0), st['wanted']) is False:
             hits.append(('check', f'described as a {kind.group(1)} role', s))
@@ -1145,6 +1278,12 @@ def screen(p, st):
         # paragraph at the end of a posting often has no heading of its own, so it becomes a check, not a skip.
         if preferred and len(hits) > before and hits[-1][0] == 'skip':
             hits[-1] = ('check',) + hits[-1][1:]
+    # Exact days beat months alone: Insulet's "Position Dates: June 7, 2027 – August 13, 2027" under a title line
+    # "June-August 2027".
+    periods = [x for x in periods if x[2]] or periods
+    if periods and st.get('available_from') and all(d < st['available_from'] for d, _, _, _, _ in periods):
+        soft = any(h for _, h, _, _, _ in periods) or all(pref for _, _, _, pref, _ in periods)
+        hits.append(('check' if soft else 'skip', f"starts before {st['available_text']}", periods[0][4]))
     if not hits:
         return 'ok', []
     verdict = 'skip' if any(v == 'skip' for v, _, _ in hits) else 'check'
