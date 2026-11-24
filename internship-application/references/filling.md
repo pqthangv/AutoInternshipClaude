@@ -17,6 +17,14 @@ Read this before filling a form, the first time in a session. Filling subagents 
 
 On iCIMS the resume is on the Candidate Profile step. When that step is already completed when you get there (the site kept the profile from an earlier application), open it before any other step, at its own address, never by its circle: the step page's address with its last part (`questions`, `eeo`, `form`) changed to `candidate` and its query changed to `mobile=true&needsRedirect=false` (`https://careers-northwind.icims.com/jobs/1234/software-intern/candidate?mobile=true&needsRedirect=false`). There, click **Replace Resume** and attach the tailored PDF even when a file of that name already shows, attach the cover letter where the step takes one, click the step's **Submit** ("iCIMS has no review page") and carry on with the step the site opens. Write on the record's Resume line `replaced on step 1 (it showed <the file name that was there>)`. If the page doesn't show Candidate Profile as the current step, or the file won't attach, stop there and hand the resume over; never go on to the last step with the resume the site kept.
 
+**Site message boxes.** On a form without the Fill button, before every file upload and every click on a step button (**Next**, **Save and Continue**), run this with `javascript_tool` in the form's tab, as the first action of the same browser batch as the upload or click, so the site's pop-up messages ("Your resume has been uploaded successfully.") become a line on the page instead of a box that blocks the tab:
+
+```
+document.getElementById('site-message')?.remove(); window.alert = m => { let b = document.getElementById('site-message'); if (!b) { b = document.createElement('p'); b.id = 'site-message'; b.setAttribute('role', 'status'); document.body.prepend(b); } b.textContent = 'Site message: ' + m; }; 'alert replaced'
+```
+
+It clears the last message, so a "Site message:" line at the top of the page is about the upload or click that followed: `find` it. If the call is refused or fails, do the upload or click without it. Change nothing else with JavaScript: never `confirm`, `prompt` or the leave warning. If a tab stops answering right after an upload or a click ("Page still loading", "Runtime.evaluate timed out", screenshots that time out), a message box is open: stop at the first such error, never reload it or start over in another tab, and hand it over: "click OK on the site's message box in tab <id>". When the user has, continue in the same tab.
+
 **Sign-ins and accounts.** Never create accounts, type passwords or enter verification codes. Hand the sign-in over like an upload:
 
 - Go as far as you can; stop on the sign-in page, or on a page that makes an account (Register, Create Account, Sign Up: name, email and password boxes), also one that opens after signing in.
