@@ -19,8 +19,9 @@ Workday (myworkdayjobs.com and myworkdaysite.com), SmartRecruiters, Rippling and
 2026-10-30 the first six hosted 68% of the open SimplifyJobs internship listings; Oracle had 5.8% on 2026-11-07.
 Added 2026-11-08, when a third of the queue was on other sites: iCIMS, Atlassian's own job list (its iCIMS links
 often answer 410), Amazon, TikTok and ByteDance pages, and any page with a schema.org JobPosting (Meta, Jibe,
-Eightfold, Paylocity). Anything else, or a lookup that fails, is reported so that posting can be opened in the
-browser as before. LinkedIn is never read.
+Eightfold). Added 2026-11-24, when a third of batch picks were unread and several of those turned out to start too
+early: Workable, Paylocity and SuccessFactors career sites (jobs.<company>.com/job/...). Anything else, or a lookup
+that fails, is reported so that posting can be opened in the browser as before. LinkedIn is never read.
 
 --profile screens each posting against the user's status, degree and availability before anyone tailors for it:
 "skip" when it plainly rules the user out (excludes F-1 students or temporary visas, no CPT or OPT, permanent work
@@ -96,7 +97,8 @@ class Closed(Failed):
 # What to allow so every supported site works (see the "hint" in the output). Workday adds one host per company.
 ALLOW = ['boards.greenhouse.io', 'job-boards.greenhouse.io', 'boards-api.greenhouse.io', 'jobs.ashbyhq.com', 'api.ashbyhq.com',
          'api.lever.co', 'api.smartrecruiters.com', 'ats.rippling.com', '*.myworkdayjobs.com', '*.myworkdaysite.com', '*.oraclecloud.com',
-         '*.icims.com', 'www.atlassian.com', 'www.amazon.jobs', 'lifeattiktok.com', 'jobs.bytedance.com', 'www.metacareers.com']
+         '*.icims.com', 'www.atlassian.com', 'www.amazon.jobs', 'lifeattiktok.com', 'jobs.bytedance.com', 'www.metacareers.com',
+         'apply.workable.com', 'recruiting.paylocity.com']
 
 
 # Being a polite client is what keeps these lookups from being blocked: say what we are, never send more than
@@ -456,6 +458,131 @@ def page(url, gone=False):
     return final, body
 
 
+def inner_html(body, m):
+    """The HTML inside the element whose opening tag regex match m found, counting nested tags of its name."""
+    tag = re.match(r'<([a-z0-9]+)', m.group(0), re.I).group(1)
+    depth = 1
+    for t in re.finditer(rf'(?i)<(/?){tag}\b[^>]*>', body[m.end():]):
+        if t.group(0).endswith('/>'):
+            continue
+        depth += -1 if t.group(1) else 1
+        if depth == 0:
+            return body[m.end():m.end() + t.start()]
+    return body[m.end():]
+
+
+def plain(fragment):
+    return re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', ' ', fragment or ''))).strip()
+
+
+_workable_names = {}  # account -> company name, once per run
+
+WORKABLE_KIND = {'text': 'text', 'email': 'text', 'phone': 'text', 'paragraph': 'text box', 'file': 'file',
+                 'dropdown': 'choice', 'boolean': 'yes/no', 'date': 'date', 'number': 'number'}
+
+
+def workable(p):
+    """Workable's public job data (the same calls its own pages make). A removed posting answers 404: all five such
+    links in the queue on 2026-11-24 were missing from their companies' job lists, and two (Mindex, RAVE Aerospace)
+    had been found closed in the browser by batches."""
+    a, s = p['account'], p['shortcode']
+    j = get(f'https://apply.workable.com/api/v2/accounts/{a}/jobs/{s}', gone=True)
+    if str(j.get('state') or 'published').lower() in ('closed', 'archived'):
+        raise Closed('closed: the site says this posting is no longer open.')
+    if a not in _workable_names:
+        try:
+            _workable_names[a] = get(f'https://apply.workable.com/api/v1/accounts/{a}').get('name')
+        except Failed:
+            _workable_names[a] = None
+    company = _workable_names[a]
+    places = [', '.join(x for x in (l.get('city'), l.get('region'), l.get('country')) if x)
+              for l in (j.get('locations') or [j.get('location') or {}]) if not l.get('hidden')]
+    where = '; '.join(dict.fromkeys(x for x in places if x))
+    how = {'remote': 'remote', 'hybrid': 'hybrid'}.get(str(j.get('workplace') or '').lower())
+    pay = ''
+    if j.get('salary_from'):
+        cur = j.get('salary_currency_iso_code') or 'USD'
+        lo, hi = j['salary_from'], j.get('salary_to')
+        pay = money(lo, cur) + ('' if hi in (None, lo) else ' to ' + money(hi, cur))
+        # Its "frequency" doesn't always match the amounts ($25 to $30 "per year", Scout Clean Energy).
+        if j.get('salary_frequency') and not (j['salary_frequency'] == 'year' and float(hi or lo) < 1000):
+            pay += f" per {j['salary_frequency']}"
+    parts = [md(j.get('description'))] + [f'### {t}\n{md(j.get(k))}' for k, t in (('requirements', 'Requirements'), ('benefits', 'Benefits'))
+                                          if j.get(k)]
+    questions, form_read = [], False
+    try:
+        for section in get(f'https://apply.workable.com/api/v1/jobs/{s}/form'):
+            for f in section.get('fields') or []:
+                kind = WORKABLE_KIND.get(f.get('type'), str(f.get('type') or ''))
+                if f.get('type') == 'multiple':
+                    kind = 'choice' if f.get('singleOption') else 'choose any'
+                options = [o.get('value') for o in f.get('options') or []] or (['Yes', 'No'] if f.get('type') == 'boolean' else [])
+                questions.append(question(f.get('label'), f.get('required'), kind, options))
+        form_read = True
+    except (Failed, AttributeError, TypeError):
+        pass  # the posting still comes through, with the form unknown
+    return {'company': company or a.replace('-', ' ').title(), 'company_from_url': not company, 'role': j.get('title'),
+            'location': where + (f' ({how})' if how else ''), 'deadline': '', 'pay': pay, 'posted': day(j.get('published')),
+            'description': '\n\n'.join(x for x in parts if x), 'questions': [q for q in questions if q], 'self_id': [],
+            'consent': [], 'form_note': '', 'form_read': form_read}
+
+
+def paylocity(p):
+    """A Paylocity job page: the posting is in the page itself (title, location, then "Description",
+    "Requirements" sections), and a removed one redirects to Jobs/JobNotFound ("that job does not exist or is not
+    currently active"; Western National 4537849, which a batch had found closed in the browser, 2026-11-23)."""
+    final, body = page(f"https://recruiting.paylocity.com/Recruiting/Jobs/Details/{p['id']}")
+    if 'jobnotfound' in final.lower():
+        raise Closed('closed: the site says this posting no longer exists.')
+    title = re.search(r'(?is)<span class="job-preview-title[^"]*">(.*?)</span>\s*</span>', body)
+    details = re.search(r'(?is)<div class="job-preview-details[^"]*">', body)
+    if not title or not details:
+        raise Failed("couldn't read this Paylocity page. Open it in the browser.")
+    company = re.search(r'"moduleName"\s*:\s*("(?:[^"\\]|\\.)*")', body)
+    try:
+        company = html.unescape(json.loads(company.group(1))) if company else ''  # a JSON string: "&" is "&"
+    except json.JSONDecodeError:
+        company = ''
+    company = re.sub(r'\s*-\s*careers( page)?$', '', company, flags=re.I).strip()
+    company = re.sub(CORP_SUFFIX, '', company, flags=re.I).strip(' ,')
+    loc = re.search(r'(?is)<div class="preview-location[^"]*">(.*?)</div>', body)
+    block = inner_html(body, details)
+    parts = []
+    heads = list(re.finditer(r'(?is)<div class="job-listing-header[^"]*">(.*?)</div>', block))
+    for i, h in enumerate(heads):
+        rest = block[h.end():heads[i + 1].start() if i + 1 < len(heads) else len(block)]
+        start = re.search(r'(?is)<div\b[^>]*>', rest)
+        text = section_text(inner_html(rest, start)) if start else ''
+        name = plain(h.group(1))
+        if text and name.lower() != 'job type':
+            parts.append(f'### {name}\n{text}')
+    return {'company': company or 'Paylocity employer', 'company_from_url': not company, 'role': plain(title.group(1)),
+            'location': re.sub(r'\s*•\s*', '; ', plain(loc.group(1))) if loc else '', 'deadline': '', 'pay': '',
+            'posted': '', 'description': '\n\n'.join(parts), 'questions': [], 'self_id': [], 'consent': [],
+            'form_note': "Paylocity shows its application questions only in the form, so none are listed here."}
+
+
+def successfactors(body, final):
+    """A SuccessFactors career site's job page (jobs.<company>.com/job/...): its title reads "<role> Job Details |
+    <company>", the posting is in class="jobdescription", the place in class="jobGeoLocation". Batches had opened
+    these in the browser unread (Erie, Huntington Ingalls, Acuity on 2026-11-23, each then skipped for a May or early
+    June start the posting states)."""
+    m = re.search(r'(?is)<(span|div)\b[^>]*class="jobdescription\b[^"]*"[^>]*>', body)
+    t = re.search(r'(?is)<title>(.*?)</title>', body)
+    if not m or not t:
+        return None
+    title = plain(t.group(1))
+    role, _, company = title.partition(' Job Details')
+    company = re.sub(CORP_SUFFIX, '', company.strip(' |'), flags=re.I).strip(' ,')
+    og = re.search(r'(?is)<meta[^>]+property="og:title"[^>]+content="([^"]*)"', body)
+    geo = re.search(r'(?is)<span class="jobGeoLocation">(.*?)</span>', body)
+    where = re.sub(r',\s*\d{5}(-\d{4})?\s*$', '', plain(geo.group(1))) if geo else ''
+    host = urllib.parse.urlparse(final).netloc.lower().removeprefix('www.')
+    return {'company': company or host.split('.')[1 if host.count('.') > 1 else 0].title(), 'company_from_url': not company,
+            'role': plain(og.group(1)) if og else role.strip(), 'location': where, 'deadline': '', 'pay': '', 'posted': '',
+            'description': section_text(inner_html(body, m)), 'questions': [], 'self_id': [], 'consent': [], 'form_note': ''}
+
+
 def json_ld_posting(body):
     """The schema.org JobPosting that many career sites put in their pages for search engines (Meta, iCIMS, Jibe,
     Eightfold, Paylocity on 2026-11-08), or None."""
@@ -559,10 +686,18 @@ def icims_behind(url, body):
 
 # A closed posting's page on a SuccessFactors career site (jobs.<company>.com/job/...?ats=successfactors): "This job
 # is currently unposted" (PACCAR ×2, 2026-11-20), "Sorry, this position has been filled" (McDonald's ×4, 2026-11-22,
-# one of which a batch then opened in the browser). Open ones carry the description in class="jobdescription" and
-# never these lines (Westinghouse, NextEra, Edison ×5, Acuity ×3, AGCO, HF Sinclair). Read from the visible text only,
-# since a site's scripts can carry the wording for every state a posting can be in.
+# one of which a batch then opened in the browser), "This job posting is no longer available" (Grainger), "This
+# requisition is no longer accepting new applications" (ULA), "The requisition is no longer accepting applications
+# or is filled" (NextEra), "This position is no longer accepting applications" (Westinghouse; all four 2026-11-24).
+# Open ones carry the description in class="jobdescription" and never these lines (Westinghouse, Edison ×5, Acuity
+# ×3, AGCO, HF Sinclair, Erie...). Read from the visible text only, since a site's scripts can carry the wording
+# for every state a posting can be in. The "no longer" wordings count only on pages titled the SuccessFactors way
+# ("<role> Job Details | <company>"), the only pages they were seen on: other sites may keep such a line hidden in
+# every page for their own error state.
 CLOSED_PAGE = re.compile(r'\b(this job is currently unposted|this (position|job|role|opening) has (already )?been filled)\b', re.I)
+SF_CLOSED = re.compile(r'\b(this|the) (job posting|posting|position|job|role|opening|requisition) is no longer '
+                       r'(available|accepting( new)? applications)\b', re.I)
+SF_TITLE = re.compile(r'(?is)<title>[^<]*\bJob Details\s*\|')
 
 
 def visible_text(body):
@@ -571,12 +706,17 @@ def visible_text(body):
 
 
 def other(p):
-    """A site without a reader of its own: its page's JobPosting data, if it has one."""
+    """A site without a reader of its own: its page's JobPosting data, or a SuccessFactors career site's page."""
     final, body = page(p['url'])
     j = json_ld_posting(body)
-    if not j and 'class="jobdescription' not in body and CLOSED_PAGE.search(visible_text(body)):
-        raise Closed('closed: the site says this posting no longer exists.')
+    if not j and 'class="jobdescription' not in body:
+        text = visible_text(body)
+        if CLOSED_PAGE.search(text) or (SF_TITLE.search(body) and SF_CLOSED.search(text)):
+            raise Closed('closed: the site says this posting no longer exists.')
     if not j:
+        d = successfactors(body, final)
+        if d and d['description']:
+            return d
         raise Failed('not a site with public job data here. Open it in the browser.')
     d = from_json_ld(j, final)
     apply = icims_behind(final, body)
@@ -706,6 +846,12 @@ def parse(url):
         return 'amazon', m and {'id': m.group(1)}
     if bare in ('lifeattiktok.com', 'careers.tiktok.com', 'jobs.bytedance.com', 'joinbytedance.com'):
         return 'bytedance', {'url': url.strip(), 'company': 'ByteDance' if 'bytedance' in bare else 'TikTok'}
+    if host == 'apply.workable.com':
+        m = re.match(r'/([^/]+)/j/([0-9A-Za-z]+)', path)
+        return 'workable', m and {'account': m.group(1), 'shortcode': m.group(2).upper()}
+    if host == 'recruiting.paylocity.com':
+        m = re.search(r'/Recruiting/Jobs/(?:Details|Apply)/(\d+)', path, re.I)
+        return 'paylocity', m and {'id': m.group(1)}
     if 'linkedin.com' in host:
         return None, None  # never read LinkedIn (SKILL.md)
     return 'other', {'url': url.strip()}
@@ -716,7 +862,8 @@ ATLASSIAN_ICIMS = {'careers-americas.icims.com', 'campus-americas.icims.com'}
 
 SITES = {'greenhouse': greenhouse, 'ashby': ashby, 'lever': lever, 'workday': workday,
          'smartrecruiters': smartrecruiters, 'rippling': rippling, 'oracle': oracle, 'atlassian': atlassian,
-         'icims': icims, 'amazon': amazon, 'bytedance': bytedance, 'other': other}
+         'icims': icims, 'amazon': amazon, 'bytedance': bytedance, 'workable': workable, 'paylocity': paylocity,
+         'other': other}
 
 
 # ---- eligibility screen: the posting's own words against the profile, before anyone tailors for it ----
@@ -724,7 +871,9 @@ SITES = {'greenhouse': greenhouse, 'ashby': ashby, 'lever': lever, 'workday': wo
 # The patterns below run on a sentence in lower case with the dots of abbreviations dropped ("U.S." is "us",
 # "Ph.D." is "ph.d", "B.S." is "bs"), so a window like [^.]{0,40} isn't cut short by "U.S.".
 REQUIRE = re.compile(r'\b(must|required?|requires|requirement|mandatory|only|need(s|ed)? to|necessary|condition of|eligible|eligibility)\b')
-NOT_REQUIRED = re.compile(r'\b(not|no)\b (be )?(required|necessary|needed|a requirement)\b')
+NOT_REQUIRED = re.compile(r'\b(not|no)\b (be )?(required|necessary|needed|a requirement)\b'
+                          # a label answered No: "US Citizenship Required for this Position: No" (Huntington Ingalls)
+                          r'|\brequired\b[^.:]{0,40}:\s*(no|none|n/?a|not required)\s*\.?$')
 # EEO statements list citizenship among the traits an employer ignores; those sentences rule no one out.
 EEO = re.compile(r'\b(without regard|regardless of|discriminat\w*|equal (employment )?opportunity|race|religion|protected (veteran|class|status)|affirmative action|'
                  r'citizenship and immigration services|e-verify)\b')
@@ -1381,7 +1530,7 @@ def cover_letter(site, p):
 
 
 SOURCE = {'other': 'the posting page', 'icims': 'the iCIMS posting page', 'amazon': 'the Amazon posting page',
-          'bytedance': 'the posting page', 'atlassian': "Atlassian's public job list"}
+          'bytedance': 'the posting page', 'atlassian': "Atlassian's public job list", 'paylocity': 'the Paylocity posting page'}
 
 
 def as_markdown(url, site, p):
