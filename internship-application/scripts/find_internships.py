@@ -22,7 +22,7 @@ Usage:
 Queue order (--append, --sort and --tidy all sort it): best-known companies first (fame 1: big tech, AI labs,
 top trading firms and household names; 2: 30+ U.S. listings on SimplifyJobs; 3: 8 to 29; 4: the rest), one
 line per company per round, newest first, and a company only as high as the batch's two-per-company limit
-(tracker rows from today and yesterday) leaves room for. Links added by hand without a note stay on top.
+(tracker rows from today) leaves room for. Links added by hand without a note stay on top.
 
 Filters (all optional; without them, sensible defaults come from profile.json in the folder):
   --term "Summer 2027"        internship term (default: profile's internship term, else Summer 2027)
@@ -739,14 +739,16 @@ def retag(line, table):
 
 
 def recent_counts(tracked):
-    """Tracker rows per company added today or yesterday, Skipped ones left out (batch.md's two-per-company limit)."""
+    """Tracker rows per company added today, Skipped ones left out (batch.md's two-per-company limit). Only today:
+    the user asked for one day (2026-11-24; it had been today and yesterday). Tracker dates have no time, so a batch
+    just after midnight no longer counts the evening's rows."""
     today = dt.date.today()
     counts = {}
     for row in {id(r): r for r in tracked.values()}.values():
         m = re.search(r'(\d{4})-(\d{2})-(\d{2})', str(row.get('date_added') or ''))
         if not m or str(row.get('status') or '').strip().lower() == 'skipped':
             continue
-        if (today - dt.date(*map(int, m.groups()))).days <= 1:
+        if dt.date(*map(int, m.groups())) == today:
             c = norm(row.get('company'))
             counts[c] = counts.get(c, 0) + 1
     return counts
@@ -757,7 +759,7 @@ def sort_queue(lines, recent):
 
     Lines without a note (links the user added by hand) and lines without a link stay on top as they were. The
     rest go by fame level, one line per company per round within a level, newest first within a company. A batch
-    takes at most two postings per company, counting the company's tracker rows from today and yesterday, so a
+    takes at most two postings per company, counting the company's tracker rows from today, so a
     company only keeps as many places at the top as that limit leaves; its other lines follow every company's
     first ones. Without that, a batch fetching the top of the queue got lines it then had to hold (simulated:
     a third batch of six picked nothing). Ties go by link, so sorting twice changes nothing.

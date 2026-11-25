@@ -19,16 +19,17 @@ Workday (myworkdayjobs.com and myworkdaysite.com), SmartRecruiters, Rippling and
 2026-10-30 the first six hosted 68% of the open SimplifyJobs internship listings; Oracle had 5.8% on 2026-11-07.
 Added 2026-11-08, when a third of the queue was on other sites: iCIMS, Atlassian's own job list (its iCIMS links
 often answer 410), Amazon, TikTok and ByteDance pages, and any page with a schema.org JobPosting (Meta, Jibe,
-Eightfold, Paylocity). Anything else, or a lookup that fails, is reported so that posting can be opened in the
-browser as before. LinkedIn is never read.
+Eightfold). Added 2026-11-24, when a third of batch picks were unread and several of those turned out to start too
+early: Workable, Paylocity and SuccessFactors career sites (jobs.<company>.com/job/...). Anything else, or a lookup
+that fails, is reported so that posting can be opened in the browser as before. LinkedIn is never read.
 
 --profile screens each posting against the user's status, degree and availability before anyone tailors for it:
 "skip" when it plainly rules the user out (excludes F-1 students or temporary visas, no CPT or OPT, permanent work
 authorization, citizenship, U.S. person status or a clearance the user can't have, a graduate-only role for an
-undergraduate, a set start date before availableFrom, in the text or as work months in the title, a posting the
-site says no longer exists), "check" for wording a person should judge (a minimum length longer than availableFrom
-to availableUntil, or work in the school year for a user free only in the summer, among them), else "ok", with the
-sentences behind it. Sponsorship alone never skips: below
+undergraduate, a set start date or work dates before availableFrom, in the text, a form question or as work
+months in the title, a posting the site says no longer exists), "check" for wording a person should judge (a
+minimum length longer than availableFrom to availableUntil, or work in the school year for a user free only in the
+summer, among them), else "ok", with the sentences behind it. Sponsorship alone never skips: below
 senior year it doesn't stop an application (SKILL.md step 2). --move-skips (with --jobs) moves skipped lines
 below "# done" with the reason, so no batch picks them again. Batch 2026-11-08 spent $2.41 of $17.76 on four
 tailoring agents for postings that were then skipped.
@@ -96,7 +97,8 @@ class Closed(Failed):
 # What to allow so every supported site works (see the "hint" in the output). Workday adds one host per company.
 ALLOW = ['boards.greenhouse.io', 'job-boards.greenhouse.io', 'boards-api.greenhouse.io', 'jobs.ashbyhq.com', 'api.ashbyhq.com',
          'api.lever.co', 'api.smartrecruiters.com', 'ats.rippling.com', '*.myworkdayjobs.com', '*.myworkdaysite.com', '*.oraclecloud.com',
-         '*.icims.com', 'www.atlassian.com', 'www.amazon.jobs', 'lifeattiktok.com', 'jobs.bytedance.com', 'www.metacareers.com']
+         '*.icims.com', 'www.atlassian.com', 'www.amazon.jobs', 'lifeattiktok.com', 'jobs.bytedance.com', 'www.metacareers.com',
+         'apply.workable.com', 'recruiting.paylocity.com']
 
 
 # Being a polite client is what keeps these lookups from being blocked: say what we are, never send more than
@@ -456,6 +458,131 @@ def page(url, gone=False):
     return final, body
 
 
+def inner_html(body, m):
+    """The HTML inside the element whose opening tag regex match m found, counting nested tags of its name."""
+    tag = re.match(r'<([a-z0-9]+)', m.group(0), re.I).group(1)
+    depth = 1
+    for t in re.finditer(rf'(?i)<(/?){tag}\b[^>]*>', body[m.end():]):
+        if t.group(0).endswith('/>'):
+            continue
+        depth += -1 if t.group(1) else 1
+        if depth == 0:
+            return body[m.end():m.end() + t.start()]
+    return body[m.end():]
+
+
+def plain(fragment):
+    return re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', ' ', fragment or ''))).strip()
+
+
+_workable_names = {}  # account -> company name, once per run
+
+WORKABLE_KIND = {'text': 'text', 'email': 'text', 'phone': 'text', 'paragraph': 'text box', 'file': 'file',
+                 'dropdown': 'choice', 'boolean': 'yes/no', 'date': 'date', 'number': 'number'}
+
+
+def workable(p):
+    """Workable's public job data (the same calls its own pages make). A removed posting answers 404: all five such
+    links in the queue on 2026-11-24 were missing from their companies' job lists, and two (Mindex, RAVE Aerospace)
+    had been found closed in the browser by batches."""
+    a, s = p['account'], p['shortcode']
+    j = get(f'https://apply.workable.com/api/v2/accounts/{a}/jobs/{s}', gone=True)
+    if str(j.get('state') or 'published').lower() in ('closed', 'archived'):
+        raise Closed('closed: the site says this posting is no longer open.')
+    if a not in _workable_names:
+        try:
+            _workable_names[a] = get(f'https://apply.workable.com/api/v1/accounts/{a}').get('name')
+        except Failed:
+            _workable_names[a] = None
+    company = _workable_names[a]
+    places = [', '.join(x for x in (l.get('city'), l.get('region'), l.get('country')) if x)
+              for l in (j.get('locations') or [j.get('location') or {}]) if not l.get('hidden')]
+    where = '; '.join(dict.fromkeys(x for x in places if x))
+    how = {'remote': 'remote', 'hybrid': 'hybrid'}.get(str(j.get('workplace') or '').lower())
+    pay = ''
+    if j.get('salary_from'):
+        cur = j.get('salary_currency_iso_code') or 'USD'
+        lo, hi = j['salary_from'], j.get('salary_to')
+        pay = money(lo, cur) + ('' if hi in (None, lo) else ' to ' + money(hi, cur))
+        # Its "frequency" doesn't always match the amounts ($25 to $30 "per year", Scout Clean Energy).
+        if j.get('salary_frequency') and not (j['salary_frequency'] == 'year' and float(hi or lo) < 1000):
+            pay += f" per {j['salary_frequency']}"
+    parts = [md(j.get('description'))] + [f'### {t}\n{md(j.get(k))}' for k, t in (('requirements', 'Requirements'), ('benefits', 'Benefits'))
+                                          if j.get(k)]
+    questions, form_read = [], False
+    try:
+        for section in get(f'https://apply.workable.com/api/v1/jobs/{s}/form'):
+            for f in section.get('fields') or []:
+                kind = WORKABLE_KIND.get(f.get('type'), str(f.get('type') or ''))
+                if f.get('type') == 'multiple':
+                    kind = 'choice' if f.get('singleOption') else 'choose any'
+                options = [o.get('value') for o in f.get('options') or []] or (['Yes', 'No'] if f.get('type') == 'boolean' else [])
+                questions.append(question(f.get('label'), f.get('required'), kind, options))
+        form_read = True
+    except (Failed, AttributeError, TypeError):
+        pass  # the posting still comes through, with the form unknown
+    return {'company': company or a.replace('-', ' ').title(), 'company_from_url': not company, 'role': j.get('title'),
+            'location': where + (f' ({how})' if how else ''), 'deadline': '', 'pay': pay, 'posted': day(j.get('published')),
+            'description': '\n\n'.join(x for x in parts if x), 'questions': [q for q in questions if q], 'self_id': [],
+            'consent': [], 'form_note': '', 'form_read': form_read}
+
+
+def paylocity(p):
+    """A Paylocity job page: the posting is in the page itself (title, location, then "Description",
+    "Requirements" sections), and a removed one redirects to Jobs/JobNotFound ("that job does not exist or is not
+    currently active"; Western National 4537849, which a batch had found closed in the browser, 2026-11-23)."""
+    final, body = page(f"https://recruiting.paylocity.com/Recruiting/Jobs/Details/{p['id']}")
+    if 'jobnotfound' in final.lower():
+        raise Closed('closed: the site says this posting no longer exists.')
+    title = re.search(r'(?is)<span class="job-preview-title[^"]*">(.*?)</span>\s*</span>', body)
+    details = re.search(r'(?is)<div class="job-preview-details[^"]*">', body)
+    if not title or not details:
+        raise Failed("couldn't read this Paylocity page. Open it in the browser.")
+    company = re.search(r'"moduleName"\s*:\s*("(?:[^"\\]|\\.)*")', body)
+    try:
+        company = html.unescape(json.loads(company.group(1))) if company else ''  # a JSON string: "&" is "&"
+    except json.JSONDecodeError:
+        company = ''
+    company = re.sub(r'\s*-\s*careers( page)?$', '', company, flags=re.I).strip()
+    company = re.sub(CORP_SUFFIX, '', company, flags=re.I).strip(' ,')
+    loc = re.search(r'(?is)<div class="preview-location[^"]*">(.*?)</div>', body)
+    block = inner_html(body, details)
+    parts = []
+    heads = list(re.finditer(r'(?is)<div class="job-listing-header[^"]*">(.*?)</div>', block))
+    for i, h in enumerate(heads):
+        rest = block[h.end():heads[i + 1].start() if i + 1 < len(heads) else len(block)]
+        start = re.search(r'(?is)<div\b[^>]*>', rest)
+        text = section_text(inner_html(rest, start)) if start else ''
+        name = plain(h.group(1))
+        if text and name.lower() != 'job type':
+            parts.append(f'### {name}\n{text}')
+    return {'company': company or 'Paylocity employer', 'company_from_url': not company, 'role': plain(title.group(1)),
+            'location': re.sub(r'\s*•\s*', '; ', plain(loc.group(1))) if loc else '', 'deadline': '', 'pay': '',
+            'posted': '', 'description': '\n\n'.join(parts), 'questions': [], 'self_id': [], 'consent': [],
+            'form_note': "Paylocity shows its application questions only in the form, so none are listed here."}
+
+
+def successfactors(body, final):
+    """A SuccessFactors career site's job page (jobs.<company>.com/job/...): its title reads "<role> Job Details |
+    <company>", the posting is in class="jobdescription", the place in class="jobGeoLocation". Batches had opened
+    these in the browser unread (Erie, Huntington Ingalls, Acuity on 2026-11-23, each then skipped for a May or early
+    June start the posting states)."""
+    m = re.search(r'(?is)<(span|div)\b[^>]*class="jobdescription\b[^"]*"[^>]*>', body)
+    t = re.search(r'(?is)<title>(.*?)</title>', body)
+    if not m or not t:
+        return None
+    title = plain(t.group(1))
+    role, _, company = title.partition(' Job Details')
+    company = re.sub(CORP_SUFFIX, '', company.strip(' |'), flags=re.I).strip(' ,')
+    og = re.search(r'(?is)<meta[^>]+property="og:title"[^>]+content="([^"]*)"', body)
+    geo = re.search(r'(?is)<span class="jobGeoLocation">(.*?)</span>', body)
+    where = re.sub(r',\s*\d{5}(-\d{4})?\s*$', '', plain(geo.group(1))) if geo else ''
+    host = urllib.parse.urlparse(final).netloc.lower().removeprefix('www.')
+    return {'company': company or host.split('.')[1 if host.count('.') > 1 else 0].title(), 'company_from_url': not company,
+            'role': plain(og.group(1)) if og else role.strip(), 'location': where, 'deadline': '', 'pay': '', 'posted': '',
+            'description': section_text(inner_html(body, m)), 'questions': [], 'self_id': [], 'consent': [], 'form_note': ''}
+
+
 def json_ld_posting(body):
     """The schema.org JobPosting that many career sites put in their pages for search engines (Meta, iCIMS, Jibe,
     Eightfold, Paylocity on 2026-11-08), or None."""
@@ -559,10 +686,18 @@ def icims_behind(url, body):
 
 # A closed posting's page on a SuccessFactors career site (jobs.<company>.com/job/...?ats=successfactors): "This job
 # is currently unposted" (PACCAR ×2, 2026-11-20), "Sorry, this position has been filled" (McDonald's ×4, 2026-11-22,
-# one of which a batch then opened in the browser). Open ones carry the description in class="jobdescription" and
-# never these lines (Westinghouse, NextEra, Edison ×5, Acuity ×3, AGCO, HF Sinclair). Read from the visible text only,
-# since a site's scripts can carry the wording for every state a posting can be in.
+# one of which a batch then opened in the browser), "This job posting is no longer available" (Grainger), "This
+# requisition is no longer accepting new applications" (ULA), "The requisition is no longer accepting applications
+# or is filled" (NextEra), "This position is no longer accepting applications" (Westinghouse; all four 2026-11-24).
+# Open ones carry the description in class="jobdescription" and never these lines (Westinghouse, Edison ×5, Acuity
+# ×3, AGCO, HF Sinclair, Erie...). Read from the visible text only, since a site's scripts can carry the wording
+# for every state a posting can be in. The "no longer" wordings count only on pages titled the SuccessFactors way
+# ("<role> Job Details | <company>"), the only pages they were seen on: other sites may keep such a line hidden in
+# every page for their own error state.
 CLOSED_PAGE = re.compile(r'\b(this job is currently unposted|this (position|job|role|opening) has (already )?been filled)\b', re.I)
+SF_CLOSED = re.compile(r'\b(this|the) (job posting|posting|position|job|role|opening|requisition) is no longer '
+                       r'(available|accepting( new)? applications)\b', re.I)
+SF_TITLE = re.compile(r'(?is)<title>[^<]*\bJob Details\s*\|')
 
 
 def visible_text(body):
@@ -571,12 +706,17 @@ def visible_text(body):
 
 
 def other(p):
-    """A site without a reader of its own: its page's JobPosting data, if it has one."""
+    """A site without a reader of its own: its page's JobPosting data, or a SuccessFactors career site's page."""
     final, body = page(p['url'])
     j = json_ld_posting(body)
-    if not j and 'class="jobdescription' not in body and CLOSED_PAGE.search(visible_text(body)):
-        raise Closed('closed: the site says this posting no longer exists.')
+    if not j and 'class="jobdescription' not in body:
+        text = visible_text(body)
+        if CLOSED_PAGE.search(text) or (SF_TITLE.search(body) and SF_CLOSED.search(text)):
+            raise Closed('closed: the site says this posting no longer exists.')
     if not j:
+        d = successfactors(body, final)
+        if d and d['description']:
+            return d
         raise Failed('not a site with public job data here. Open it in the browser.')
     d = from_json_ld(j, final)
     apply = icims_behind(final, body)
@@ -706,6 +846,12 @@ def parse(url):
         return 'amazon', m and {'id': m.group(1)}
     if bare in ('lifeattiktok.com', 'careers.tiktok.com', 'jobs.bytedance.com', 'joinbytedance.com'):
         return 'bytedance', {'url': url.strip(), 'company': 'ByteDance' if 'bytedance' in bare else 'TikTok'}
+    if host == 'apply.workable.com':
+        m = re.match(r'/([^/]+)/j/([0-9A-Za-z]+)', path)
+        return 'workable', m and {'account': m.group(1), 'shortcode': m.group(2).upper()}
+    if host == 'recruiting.paylocity.com':
+        m = re.search(r'/Recruiting/Jobs/(?:Details|Apply)/(\d+)', path, re.I)
+        return 'paylocity', m and {'id': m.group(1)}
     if 'linkedin.com' in host:
         return None, None  # never read LinkedIn (SKILL.md)
     return 'other', {'url': url.strip()}
@@ -716,7 +862,8 @@ ATLASSIAN_ICIMS = {'careers-americas.icims.com', 'campus-americas.icims.com'}
 
 SITES = {'greenhouse': greenhouse, 'ashby': ashby, 'lever': lever, 'workday': workday,
          'smartrecruiters': smartrecruiters, 'rippling': rippling, 'oracle': oracle, 'atlassian': atlassian,
-         'icims': icims, 'amazon': amazon, 'bytedance': bytedance, 'other': other}
+         'icims': icims, 'amazon': amazon, 'bytedance': bytedance, 'workable': workable, 'paylocity': paylocity,
+         'other': other}
 
 
 # ---- eligibility screen: the posting's own words against the profile, before anyone tailors for it ----
@@ -724,7 +871,9 @@ SITES = {'greenhouse': greenhouse, 'ashby': ashby, 'lever': lever, 'workday': wo
 # The patterns below run on a sentence in lower case with the dots of abbreviations dropped ("U.S." is "us",
 # "Ph.D." is "ph.d", "B.S." is "bs"), so a window like [^.]{0,40} isn't cut short by "U.S.".
 REQUIRE = re.compile(r'\b(must|required?|requires|requirement|mandatory|only|need(s|ed)? to|necessary|condition of|eligible|eligibility)\b')
-NOT_REQUIRED = re.compile(r'\b(not|no)\b (be )?(required|necessary|needed|a requirement)\b')
+NOT_REQUIRED = re.compile(r'\b(not|no)\b (be )?(required|necessary|needed|a requirement)\b'
+                          # a label answered No: "US Citizenship Required for this Position: No" (Huntington Ingalls)
+                          r'|\brequired\b[^.:]{0,40}:\s*(no|none|n/?a|not required)\s*\.?$')
 # EEO statements list citizenship among the traits an employer ignores; those sentences rule no one out.
 EEO = re.compile(r'\b(without regard|regardless of|discriminat\w*|equal (employment )?opportunity|race|religion|protected (veteran|class|status)|affirmative action|'
                  r'citizenship and immigration services|e-verify)\b')
@@ -886,7 +1035,7 @@ NOT_START = re.compile(r'\b(appl(y|ied|ying|ications?)|deadline|posted|interview
 # "Interns may start as early as May 18" or "June 1 or later" sets no limit on a later start.
 START_ANY_LATER = re.compile(r'\b(as early as|or later|or after|no earlier than|at the earliest)\b')
 START_HEDGE = re.compile(r'\b(typically|usually|generally|normally|tentative\w*|approximately|approx|around|roughly|flexib\w*|prefer\w*|'
-                         r'ideally|may|might|expected|estimated|anticipated|tbd|subject to change|or later|later start|var(y|ies)|depending|negotiable)\b')
+                         r'ideal\w*|may|might|expected|estimated|anticipated|tbd|subject to change|or later|later start|var(y|ies)|depending|negotiable)\b')
 
 
 def early_start(low, st, several_terms=True):
@@ -941,6 +1090,101 @@ def title_early(title, st):
     if not y1 and MONTH_ABBR.index(start[:3]) > MONTH_ABBR.index(end[:3]):
         y1 = str(int(y2 or st.get('year') or dt.date.today().year) - 1)
     return early_start(f"runs from {start} {y1 or ''} to {end} {y2 or ''}", st)
+
+
+# A work period written as a date range with no start word, which early_start() doesn't read: "Position Dates:
+# June 7, 2027 – August 13, 2027" (Insulet), "Duration: May-August 2027", "Option 1: May 24, 2027 – August 6, 2027"
+# (ICE), "planned to occur between Monday, May 17 and Friday, August 6, 2027" (Panasonic), "10-week paid internship
+# (June 1 - August 6)" (National Life), "the 8-week summer program (6/7-7/30)" (UDig), "Summer 2027: May – August"
+# (Persona), "available to work full-time from June 7, 2027 to August 13, 2027" (Tanium). In the 2026-11-22/23
+# batches about 15 such postings were tailored for and then skipped by hand.
+WEEKDAY = r'(?:(?:mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?\.?,?\s+)?'
+DAY_YEAR = r'(?:\s+(\d{1,2})(?:st|nd|rd|th)?\b)?(?:,?\s+(20\d\d))?'
+NAMED_RANGE = re.compile(rf'\b(between\s+)?{WEEKDAY}{MONTH_NAME}\.?{DAY_YEAR},?\s*(-|–|—|\bto\b|\bthrough\b|\bthru\b|\buntil\b|\band\b)\s*'
+                         rf'(?:(?:early|mid|late)\s*-?\s*)?{WEEKDAY}{MONTH_NAME}\.?{DAY_YEAR}')
+NUM_RANGE = re.compile(r'(?<![\d/])(\d{1,2})/(\d{1,2})(?:/(20\d\d))?\s*(?:-|–|—|\bto\b|\bthrough\b|\buntil\b)\s*'
+                       r'(\d{1,2})/(\d{1,2})(?:/(20\d\d))?(?![\d/])(?!\s*(time|fte|of|days?|hours?|weeks?)\b)')  # not "1/2-3/4 time"
+# The sentence has to be about the job's own dates. Ranges about school, perks or the office aren't
+# ("enrolled for the January – May 2027 semester", "Summer Fridays (May – September)").
+PERIOD_CONTEXT = re.compile(r'\b(intern\w*|co-?ops?|programs?|position|term|dates?|duration|periods?|timing|sessions?|'
+                            r'cohort|assignment|placement|rotation|availab\w*|full[- ]time|employment)\b')
+NOT_PERIOD = re.compile(r'\b(summer fridays?|holidays?|benefits?|enroll\w*|academic|classes|coursework|tuition|open house|blackout|'
+                        r'postings?|remains? open|open (from|until|through))\b')  # "This posting will remain open from ..."
+# "Option 1: ...", "Timing: ...", "Summer 2027: ...": a short label, then the range
+PERIOD_LABEL = re.compile(r"^[a-z0-9][a-z0-9 &/()'.-]{0,40}:\s*$")
+PERIOD_MIN_DAYS = 46  # a shorter range is a window to start in ("start between May 24 and June 7"), not the job
+# Right after a start word, a range is when the job may start ("a 12-consecutive-week, in-person internship
+# starting between May and July", Reliable Robotics), so its end is the latest start.
+START_WINDOW = re.compile(r'\b(start\w*|begin\w*|commenc\w*)(\s+\S+){0,2}\s*$')
+
+
+def period_dates(m1, d1, y1, m2, d2, y2, year):
+    """(first day, last day it could start, end) of a range; a month alone spans the month. Missing years come
+    from the other end, else the term's year; "September – May 2027" starts the year before."""
+    import calendar
+    y1, y2 = (int(y1) if y1 else None), (int(y2) if y2 else None)
+    if y2 is None:
+        y2 = (y1 + (m1 > m2)) if y1 else year
+    if y1 is None:
+        y1 = y2 - 1 if m1 > m2 else y2
+    try:
+        first = dt.date(y1, m1, d1 or 1)
+        latest = dt.date(y1, m1, d1 or calendar.monthrange(y1, m1)[1])
+        end = dt.date(y2, m2, d2 or calendar.monthrange(y2, m2)[1])
+    except ValueError:
+        return None
+    return first, latest, end
+
+
+def work_periods(low, st, several_terms=True, context=False):
+    """The work periods a sentence gives as date ranges: [(latest start day, hedged, start has a day)]. Only ranges
+    of the term's year that last PERIOD_MIN_DAYS or more. context: the sentence is a choice under a question about
+    the job's dates, so it needs no context word of its own."""
+    year = st.get('year')
+    if not st.get('available_from') or NOT_START.search(low) or NOT_PERIOD.search(low) or START_ANY_LATER.search(low):
+        return []
+    seasons = set(re.findall(r'\b(winter|spring|summer|fall|autumn)\b', low))
+    if several_terms and seasons and st.get('season') and st['season'] not in seasons:
+        return []  # "Fall 2027: August – December" in a posting that lists several terms
+    found = []
+    for m in NAMED_RANGE.finditer(low):
+        if m.group(5) == 'and' and not m.group(1):
+            continue  # "May and June" is a list; "between May 17 and August 6" is a range
+        m1, m2 = MONTH_ABBR.index(m.group(2)[:3]) + 1, MONTH_ABBR.index(m.group(6)[:3]) + 1
+        d1, d2 = (int(m.group(3)) if m.group(3) else None), (int(m.group(7)) if m.group(7) else None)
+        found.append((m.start(), m.end(), period_dates(m1, d1, m.group(4), m2, d2, m.group(8), year)))
+    for m in NUM_RANGE.finditer(low):
+        a, b = (int(m.group(1)), int(m.group(2))), (int(m.group(4)), int(m.group(5)))
+        if 1 <= a[0] <= 12 and 1 <= b[0] <= 12:
+            found.append((m.start(), m.end(), period_dates(a[0], a[1], m.group(3), b[0], b[1], m.group(6), year)))
+    # A range that has already begun isn't the job's coming dates ("Posting Period: 10/20/2026 - 01/15/2027").
+    today = dt.date.today()
+    found = [(s, e, p) for s, e, p in found
+             if p and p[2].year == year and (p[2] - p[0]).days >= PERIOD_MIN_DAYS and p[0] > today]
+    if not found:
+        return []
+    found = [(s, e, (p[0], p[2], p[2]) if START_WINDOW.search(low[:s]) else p) for s, e, p in found]
+    if not (context or PERIOD_CONTEXT.search(low) or PERIOD_LABEL.match(low[:min(s for s, _, _ in found)])):
+        return []
+    plain = low
+    for s, e, _ in sorted(found, reverse=True):
+        plain = plain[:s] + ' ' + plain[e:]
+    for s, e, _, _ in reversed(dates_in(plain, year)):  # "in May" isn't the hedge "may"
+        plain = plain[:s] + ' ' + plain[e:]
+    hedged = bool(START_HEDGE.search(plain))
+    # Months alone over five months or more ("a full-time internship between May–September", "January to August
+    # 2027") name the season or a long co-op term the job falls in, not its dates: a check.
+    out = []
+    for s, e, p in found:
+        days = bool(re.search(r'\d{1,2}\b', re.sub(r'20\d\d', '', low[s:e])))
+        out.append((p[1], hedged or (not days and months(p) >= 5), days and p[0] == p[1]))
+    return out
+
+
+def months(period):
+    """Calendar months a period touches: May to September is 5."""
+    first, _, end = period
+    return (end.year - first.year) * 12 + end.month - first.month + 1
 
 
 # A length the user's window (availableFrom to availableUntil) is too short for: "Available for a 4+ month co-op"
@@ -1016,20 +1260,26 @@ def sentences(text):
     """(sentence, under a "Preferred" heading, under a "Required" heading) triples. A heading is a "###" line or a
     short line with no full stop ("Preferred Qualifications", "Minimum Qualifications:"). Lines under a required
     heading are requirements even without "must" ("- U.S. Citizen or Permanent Residency")."""
-    out, preferred, required = [], False, False
+    out, preferred, required, listed = [], False, False, False
     for raw in str(text or '').split('\n'):
         line = raw.strip()
         if not line:
             continue
+        bullet = line.startswith(('-', '*'))
         lead = re.match(r'^(#+\s*)?((?:minimum|basic|required|preferred|desired|additional|bonus)?\s*(?:qualifications|requirements|skills)[^:.]{0,40}:|nice to have:?|preferred:)', line, re.I)
-        heading = line.startswith('#') or (not line.startswith(('-', '*')) and len(line) <= 70 and not re.search(r'[.!?]$', line)
+        heading = line.startswith('#') or (not bullet and len(line) <= 70 and not re.search(r'[.!?]$', line)
                                            and HEADING_WORDS.search(line))
         if lead or heading:
             head = lead.group(0) if lead else line
             preferred = bool(PREFERRED_HEAD.search(head))
             required = not preferred and bool(REQUIRED_HEAD.search(head))
-        elif len(line) > 100 and not line.startswith(('-', '*')):
-            preferred = required = False  # a paragraph after the list ends it (Amca's ITAR paragraph under "Preferred Skills")
+            listed = False
+        elif (len(line) > 100 or listed) and not bullet:
+            # A paragraph after the list ends it (Amca's ITAR paragraph under "Preferred Skills"), and so does any
+            # plain line after its bullets: "Start Date: May 17, 2027" after IDEMIA's "Preferred Qualifications"
+            # bullets isn't a preference.
+            preferred = required = False
+        listed = listed or bullet
         # The heading line itself isn't one of the requirements under it ("Security Clearance & Other Requirements:").
         under = required and not ((lead and len(line) == len(lead.group(0))) or (heading and not lead))
         line = ABBREV.sub(lambda m: m.group(0).replace('.', '\x00'), re.sub(r'^[\s#*-]+', '', line).strip())
@@ -1063,12 +1313,43 @@ def screen(p, st):
     # A start date set only in the form: "Can you commit to attending the full ... Program, starting on June 7, 2027
     # and finishing on August 6, 2027?" (ParetoHealth, 2026-11-22; its text said only "June through August"). Only
     # yes/no and other choice questions: a box asking when the user can start sets nothing.
+    # Work periods given as date ranges, over the whole posting: (latest start day, hedged, start has a day, under a
+    # Preferred heading, sentence). One that starts late enough means the user can take it ("Option 2: June 14 –
+    # August 20").
+    periods = []
     for q in p.get('questions') or []:
         label = undotted(str(q.get('label') or ''))
         if q.get('options') and not re.search(r'\b(e\.?g|for example|such as)\b', label, re.I):
             early = early_start(label.lower(), st, several)
             if early:
                 hits.append((early, f"starts before {st['available_text']}", label))
+                continue
+            low_label = label.lower()
+            if re.search(r'\binterest', low_label):
+                continue  # "Would you be interested ... in a combined Spring and Summer internship (January to August)?"
+            # "Are you available to work ... from May 17, 2027 to August 13th, 2027?" (Minitab)
+            periods += [(d, h, x, False, label) for d, h, x in work_periods(low_label, st, several)]
+            # Dates in the choices: "Which term would you like to be considered for an internship?" with
+            # "Summer 2027 (May 24 - August 13)" (Persona): the choices naming the user's term, or all when none
+            # names a term. Choices naming only other terms are other times ("What other internship times are
+            # you open to?" with "Winter 2027 (Jan 2027 through April 2027)", Quadrillion).
+            if PERIOD_CONTEXT.search(low_label) and not NOT_START.search(low_label):
+                opts = [undotted(str(o)) for o in q['options']]
+                named = [o for o in opts if re.search(r'\b(winter|spring|summer|fall|autumn)\b', o, re.I)]
+                own = [o for o in named if st.get('season') and re.search(rf"\b{st['season']}\b", o, re.I)]
+                for o in (own if named else opts):
+                    periods += [(d, h, x, False, f'{label} {o}') for d, h, x in work_periods(o.lower(), st, False, context=True)]
+
+    def start_dates(low, s, preferred, demote):
+        """A set start date (early_start) or work periods (into `periods`) in one sentence. demote: make a skip a
+        check here, under a "Preferred" heading ("Preferred: able to start mid-May")."""
+        early = early_start(low, st, several)
+        if early:
+            return [('check' if demote else early, f"starts before {st['available_text']}", s)]
+        word = START_WORDS.search(low)
+        if not (word and any(d[0] >= word.start() for d in dates_in(low, st['year']))):  # early_start read those
+            periods.extend((d, h, x, preferred, s) for d, h, x in work_periods(low, st, several))
+        return []
 
     prev = ''
     for s, preferred, required in sentences(html.unescape(p['description'] or '')):  # some job data is escaped twice ("&#xa;")
@@ -1082,7 +1363,10 @@ def screen(p, st):
         needed = (REQUIRE.search(low) or required or LABELLED.search(low)) and not NOT_REQUIRED.search(low)
         may = re.search(r'\bmay\b', low)
         if SHORT_HEADING.search(low.strip()) and not (REQUIRE.search(low) or required):
-            continue  # a bare heading ("Security Clearance") says nothing yet; the lines under it do
+            # a bare heading ("Security Clearance") says nothing yet; the lines under it do. A short line can still
+            # give the dates ("Duration: May-August 2027").
+            hits += start_dates(low, s, preferred, preferred)
+            continue
         cpt = re.search(r'\bCPT\b', cased) or 'curricular practical training' in low
         support = NO_SUPPORT.search(low)
         follows = INCLUDES.search(low) and (cpt or VISA.search(low)) and NO_SPONSOR_BEFORE.search(last)
@@ -1130,9 +1414,7 @@ def screen(p, st):
             hits.append(('check', 'degree level', s))
         elif st['below_senior'] is False and st['sponsor'] and NO_SPONSOR.search(low):
             hits.append(('check', 'sponsorship', s))
-        early = early_start(low, st, several)
-        if early:
-            hits.append((early, f"starts before {st['available_text']}", s))
+        hits += start_dates(low, s, preferred, False)  # the Preferred check below demotes it
         kind = SELF_KIND.search(low)
         if kind and st.get('wanted') and fi.role_fits(kind.group(0), st['wanted']) is False:
             hits.append(('check', f'described as a {kind.group(1)} role', s))
@@ -1145,6 +1427,12 @@ def screen(p, st):
         # paragraph at the end of a posting often has no heading of its own, so it becomes a check, not a skip.
         if preferred and len(hits) > before and hits[-1][0] == 'skip':
             hits[-1] = ('check',) + hits[-1][1:]
+    # Exact days beat months alone: Insulet's "Position Dates: June 7, 2027 – August 13, 2027" under a title line
+    # "June-August 2027".
+    periods = [x for x in periods if x[2]] or periods
+    if periods and st.get('available_from') and all(d < st['available_from'] for d, _, _, _, _ in periods):
+        soft = any(h for _, h, _, _, _ in periods) or all(pref for _, _, _, pref, _ in periods)
+        hits.append(('check' if soft else 'skip', f"starts before {st['available_text']}", periods[0][4]))
     if not hits:
         return 'ok', []
     verdict = 'skip' if any(v == 'skip' for v, _, _ in hits) else 'check'
@@ -1242,7 +1530,7 @@ def cover_letter(site, p):
 
 
 SOURCE = {'other': 'the posting page', 'icims': 'the iCIMS posting page', 'amazon': 'the Amazon posting page',
-          'bytedance': 'the posting page', 'atlassian': "Atlassian's public job list"}
+          'bytedance': 'the posting page', 'atlassian': "Atlassian's public job list", 'paylocity': 'the Paylocity posting page'}
 
 
 def as_markdown(url, site, p):
