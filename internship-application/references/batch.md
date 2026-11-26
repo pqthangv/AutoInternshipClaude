@@ -143,8 +143,9 @@ named site only when none of those is offered. On a Workday search list, type th
 Board", not "Job Board"), press Enter once, click its reference and check "1 item selected, <that item>"; if
 another item shows, clear it and pick again before Save and Continue (filling.md, "Keep browser work cheap").
 On Workday, fix the parsed work entries on My Experience before its Save and Continue: every Job Title and
-Company box holds that entry's title or name as resume-src/ prints it, or a shorter form of it, and nothing else
-(no place, heading or site name); keep leadership and activity entries, fixed like jobs; if it parsed none, add
+Company box holds that entry's whole title or name as resume-src/ prints it, in plain text, and nothing else (no
+place, heading or site name; the whole name where the parse cut it short); keep leadership and activity entries,
+fixed like jobs; if it parsed none, add
 the jobs from resume-src/'s Experience section. The Fill button tidies
 the Role Descriptions; one it lists under Left gets that entry's bullets from resume-src/. A past job's location
 box it leaves (Workday or iCIMS) gets that entry's place from the resume, never the user's address. A Company
@@ -152,8 +153,8 @@ box it leaves gets the name as the resume prints it, in plain text, with the pla
 one find before Save and Continue (filling.md, "Filling the form").
 On the review page, read every Role Description in the page text: a section heading ("Projects"), a "Name |
 tools" line, another job's first line or a sentence broken over two lines still in one goes under Left for you
-and on the For the user line, with the exact lines to delete; so does a Company or Job Title with anything else
-in it, which fails the check before Submit. Never go back from the review page to change work entries.
+and on the For the user line, with the exact lines to delete; so does a Company or Job Title that isn't the
+resume's whole name or title, which fails the check before Submit. Never go back from the review page to change work entries.
 The user <saw | didn't see (auto)> the drafted answers.
 For this application only: fill the form in the user's browser up to the review page or the first thing
 that needs the user, add each page's fields to application-record.md as you go, and log the tracker row

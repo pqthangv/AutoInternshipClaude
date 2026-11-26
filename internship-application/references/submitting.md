@@ -48,7 +48,7 @@ On the last page before Submit (Workday's review page, iCIMS's final form), all 
 2. The attached resume is this job's tailored PDF (its file name shows on the page; on iCIMS, whose final form doesn't show it, application-record.md shows it was attached or replaced on Candidate Profile in this application, not kept from an earlier one), and an attached or pasted cover letter is this job's (its file name or text names this company).
 3. Each written answer on the page is the one drafted for this posting, and the user saw it at the checkpoint or in the hand-off (unless they said auto).
 4. Nothing required is open: nothing on the extension's Left list, no unanswered question, no box left because it charges money.
-5. Every answer came from the profile, the master resume, the user or this posting; sponsorship and self-identification only from the profile. Every work entry's Company and Job Title hold the resume's name and title, or a shorter form of them, and nothing else: a place left at the end of a Company box fails this.
+5. Every answer came from the profile, the master resume, the user or this posting; sponsorship and self-identification only from the profile. Every work entry's Company and Job Title hold the resume's whole name and title and nothing else: a place left at the end of a Company box, or a name the parse cut short, fails this.
 6. The tracker has no `Submitted` row for the same company and role, unless the user said at step 1 to apply again.
 7. application-record.md has every field from every page, and the tracker row is there.
 
