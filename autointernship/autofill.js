@@ -1026,11 +1026,19 @@
   // "Seattle" in that entry's Location box): 9 forms in the same batches, each noticed only on the
   // review page. Left for Claude with the likely name rather than cut here, since a company's own name can end
   // with its city ("The Bank of New York" in New York).
+  // More often the parse can't tell the place is a place (a region such as "Pacific Northwest" rather than
+  // "City, Country"): it leaves the Location box empty and puts the whole line in Company ("Northwind Labs
+  // Pacific Northwest"). The check below then has nothing to compare: in its first week it never fired, while
+  // such Company boxes went out on several submitted forms. So a Company box of two or more words beside an
+  // empty Location box is left for Claude too; one word can't hold both a name and a place.
   const WORK_COMPANY = /^workExperience-\d+--companyName$/;
   function companyWithLocation(el) {
     const where = document.getElementById(el.id.replace(/companyName$/, 'location'));
     const loc = where ? String(where.value || '').trim() : '';
     const now = String(el.value || '').trim();
+    if (where && where.tagName === 'INPUT' && !loc && now.split(/\s+/).length >= 2) {
+      return `"${now.slice(0, 80)}" beside an empty Location: the place may be at its end; check it against the resume`;
+    }
     if (loc.length < 3 || !now.toLowerCase().endsWith(' ' + loc.toLowerCase())) return null;
     const rest = now.slice(0, now.length - loc.length).replace(/[\s,;|–-]+$/, '');
     return rest ? `ends with this entry's location "${loc}": check it against the resume (without it: "${rest}")` : null;
