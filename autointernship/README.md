@@ -29,7 +29,7 @@ iCIMS shows its last step's forms (veteran, disability) in a frame. AutoInternsh
 
 Some forms (SmartRecruiters) keep their upload box inside the site's own page components, where Claude's browser tools can't reach it. AutoInternship adds a plain box below it, such as **Resume file (AutoInternship)**. A file put there goes to the form's box, and a line under it says whether the form shows it.
 
-On Workday's work experience step, it also tidies each job's description that Workday copied from your resume: it joins lines broken in the middle of a sentence, puts back the first "•", and removes another section's heading or the next job's first line copied in at the end. The panel lists what it changed. A description it can't sort out is left as it is and listed as left. It also turns your phone number into the plain digits Workday's phone box takes when Workday copied it with a "+1" and brackets, and lists a job's company box that ends with that job's location.
+On Workday's work experience step, it also tidies each job's description that Workday copied from your resume: it joins lines broken in the middle of a sentence, puts back the first "•", and removes another section's heading or the next job's first line copied in at the end. The panel lists what it changed. A description it can't sort out is left as it is and listed as left. It also turns your phone number into the plain digits Workday's phone box takes when Workday copied it with a "+1" and brackets, and lists a job's company box that ends with that job's location, or that sits beside an empty location box.
 
 ## Use with Claude
 
