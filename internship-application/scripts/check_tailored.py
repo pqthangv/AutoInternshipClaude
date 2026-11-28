@@ -8,7 +8,8 @@ Usage:
 TAILORED is the tailored source in scratch space (.tex or .docx). In order, it runs:
   1. build_resume.py (a .tex copy only): one page, readable text, empty lines at the bottom. If the page runs
      over, it stops here and reports only how much to cut, because every other result changes after trimming.
-  2. compare_bullets.py: how many bullets are still word for word, and any with no source in the master.
+  2. compare_bullets.py: how many bullets are still word for word, any with no source in the master, and entries
+     left with one bullet (under "fix").
   3. check_resume.py --resume: numbers and terms that aren't in the master or profile, lost contact details.
   4. ats_check.py: parse problems and the posting's keywords.
   5. Renders page 1 to a PNG beside the PDF, to look at once before saving.
@@ -225,7 +226,11 @@ def main():
         review.append(f"Bullet comparison didn't run: {cmp_['error']}")
     else:
         result['bullets'] = {k: cmp_[k] for k in ('tailored_bullets', 'unchanged', 'reworded', 'merged', 'no_source', 'unchanged_share')}
-        review += cmp_['advice']
+        result['bullets']['one_bullet_entries'] = len(cmp_.get('lone_bullets', []))
+        for line in cmp_['advice']:
+            # An entry with one bullet is a must-change: tailoring.md's written minimum alone was explained away
+            # ("the page is full") on most versions.
+            (fix if line.startswith('One bullet under: ') else review).append(line)
         if cmp_['unchanged_share'] > 0.5:
             same = [short(b['tailored'], 60) for b in bullets if b['verdict'] == 'unchanged']
             review.append('Word for word: ' + ('all of them' if len(same) == len(bullets) else
