@@ -109,7 +109,7 @@ Read `references/tailoring.md` before your first tailoring in a session, and `re
 
    For a .docx copy, pass `--pdf "<scratch PDF>"` instead of `--out`. The first time in a session, add `--check-template`. It prints only what needs attention:
    - **Too long** (exit 2 with `lines_over`; nothing else is checked yet): cut about that many lines in one pass, in tailoring.md's trim order. When only a few lines are over and the next cut is a strong match for the posting, squeeze instead (wording, then spacing, then margins down to 0.4 inch, then font size down to 9pt), within tailoring.md's limits.
-   - **`fix`**: change these before saving: ATS parse problems, lost contact details, placeholders, margins or text size past the limits, lines past the margin.
+   - **`fix`**: change these before saving: ATS parse problems, lost contact details, placeholders, margins or text size past the limits, lines past the margin, an entry left with one bullet (tailoring.md's "Bullets per entry").
    - **`review`**: change each one, or say in changes.md why it stays.
      - Empty lines at the bottom: add about that many from the master ("Filling the page" in tailoring.md).
      - More than half the bullets word for word: redo the rewrite pass.

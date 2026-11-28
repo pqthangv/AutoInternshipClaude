@@ -18,7 +18,7 @@ For each kept bullet:
 
 - **Decide its job:** which of the three to five things it proves.
 - **Lead with that:** the action and the posting's word for the skill, if true to what the user did ("Wrote REST endpoints in Flask" for a backend role, "Built the drag-and-drop schedule view in React" for a frontend one).
-- **Pull the matching facts forward** from that entry. You may merge two bullets from the same entry or split one, as long as every fact comes from the master.
+- **Pull the matching facts forward** from that entry. You may merge two bullets from the same entry or split one, as long as every fact comes from the master and the entry keeps two bullets ("Bullets per entry").
 - **End with the master's result** (users, numbers, speed) when it has one.
 - **Keep it word for word only when it already leads with what this posting wants.**
 
@@ -42,6 +42,13 @@ Versions for different roles must read differently.
 - Then whichever of Experience or Projects is stronger evidence for this internship. Keep the master's section names.
 - Leadership and activities, then Skills, at the end. Drop a section only if nothing in it is relevant and space is needed.
 
+## Bullets per entry
+
+- Every job, project, research role and activity on the page has at least two bullets, unless the master gives it one. Education, awards, honors and skills don't count.
+- The second bullet comes from another of that entry's master bullets, never from splitting one bullet in two.
+- When an entry's two bullets don't fit, drop the whole entry. A research role stays, and so does a part-time job for a student with little other experience: make room elsewhere. A section goes with its last entry.
+- A line or two free at the bottom is better than an entry with one bullet: never add an entry you can give only one. A leftover line goes to a kept entry (a longer bullet or a third one); with nothing to add, say why on the Page line in changes.md.
+
 ## Awards and honors: lowest priority
 
 - Never move them up or give them space a project, job or skill could use.
@@ -52,19 +59,22 @@ Versions for different roles must read differently.
 
 ## Trimming to one page
 
-**For a master over about two pages, select instead of cutting.** Start the copy from what to keep: header, education entry and coursework line, the two to four best-matching projects and experience entries (with their most relevant bullets), any research role (see "Experience"), one or two activities if they fit, and skills. Leave awards out of this first selection. Build, then add back ("Filling the page") or trim (below).
+**For a master over about two pages, select instead of cutting.** Start the copy from what to keep: header, education entry and coursework line, the two to four best-matching projects and experience entries (with their most relevant bullets, at least two each), any research role (see "Experience"), one or two activities if they fit (two bullets each), and skills. Leave awards out of this first selection. Build, then add back ("Filling the page") or trim (below).
 
 The check lists master keywords missing from this page; bring back the ones that matter most while staying on one page.
 
 **When the build reports `lines_over`**, cut about that many lines in one pass, in this order, then build again:
 
 1. Awards, honors, scholarships and Dean's List lines (keep at most one, last).
-2. Projects, bullets and activities that show nothing the posting asks for.
+2. Projects, activities and bullets that show nothing the posting asks for.
 3. Third and later bullets on less relevant entries.
-4. Older or unrelated part-time jobs and research roles down to one bullet (keep the entry).
+4. Older or unrelated part-time jobs and research roles down to two bullets (keep the entry).
 5. Activities beyond the one or two most relevant.
 6. The coursework line down to the four most relevant courses.
 7. Long bullets shortened to one line, keeping every fact and number.
+8. The least relevant project beyond the top two, or the last activity: the whole entry.
+
+No cut leaves an entry with one bullet ("Bullets per entry").
 
 Never cut the name and contact line, the education entry (school, degree, major, graduation date, and GPA if the master shows it), or the strongest match for the posting.
 
@@ -79,13 +89,13 @@ Then check the rendered page is still easy to skim. If it doesn't fit within the
 
 ## Filling the page
 
-The page is done when its last line is within about a line of the bottom margin, or nothing left in the master fits the posting. At 2 or more `free_lines`, add about that many lines (a two-line bullet counts as two) in this order, then build again:
+The page is done when its last line is within about a line of the bottom margin, or nothing left in the master fits the posting, or the only addition left would be an entry with one bullet. At 2 or more `free_lines`, add about that many lines (a two-line bullet counts as two) in this order, then build again:
 
 1. **More bullets on the entries you kept**, most relevant first: three or four on the top one or two projects and the main internship, at least two on every other kept entry.
 2. **Split merges made only for space.**
-3. **The next most relevant project or experience** you left out.
+3. **The next most relevant project or experience** you left out, with two bullets.
 4. **Keywords the user really has**: more courses in the coursework line; skills the ATS check lists under `in_master_not_resume`.
-5. **One more activity**, if it shows something the posting asks for (teamwork, leadership, communication).
+5. **One more activity** with two bullets, if it shows something the posting asks for (teamwork, leadership, communication).
 6. **Awards last**: at most one line.
 
 Every addition goes through the rewrite pass. If a build spills onto page 2, take back the last addition or shorten a bullet. Never pad with unrelated material, repeat a fact, or stretch spacing. If you stop with 2 or more lines free, say why on the Page line in changes.md.
@@ -101,14 +111,14 @@ Every addition goes through the rewrite pass. If a build spills onto page 2, tak
 
 - The two to four projects that best match the posting.
 - In each heading, list the tools the posting mentions first, only tools the project used.
-- Three or four bullets on the strongest one or two, at least two on the others; one only when the page is truly full. The first bullet shows the project's strongest link to the posting.
+- Three or four bullets on the strongest one or two, at least two on the others ("Bullets per entry"). The first bullet shows the project's strongest link to the posting.
 - Group and class projects: the user's own part ("Implemented the prerequisite checker for a 4-person class project"), never the team's result as theirs. Labeling a class project is fine.
 
 ## Experience
 
 - Internships, research and technical jobs: order bullets by relevance and rewrite them to lead with the posting's vocabulary where true.
-- Research roles (student researcher, research assistant, lab member): keep the entry on every version. When its work also appears as projects, give it one or two bullets on what those don't say: the program or lab, how long, outputs (papers, reports, presentations, awards). Leave technical detail to the projects, so no fact appears twice.
-- Part-time and campus jobs (retail, food service, tutoring, campus IT): keep one or two bullets on skills the posting asks for (communication, time pressure, training others, handling money). Don't drop them for a student with little other experience.
+- Research roles (student researcher, research assistant, lab member): keep the entry on every version, with two bullets. When its work also appears as projects, the first says what those don't: the program or lab, how long, outputs (papers, reports, presentations, awards). The second is work of the role that no kept project shows; if a kept project shows all of it, take that fact out of the project instead. No fact appears twice.
+- Part-time and campus jobs (retail, food service, tutoring, campus IT): keep two bullets on skills the posting asks for (communication, time pressure, training others, handling money). Don't drop them for a student with little other experience.
 
 ## Skills
 
